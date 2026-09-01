@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>schwing's node</title>
+  <link rel="icon" href="static/logo.svg?v=1" type="image/svg+xml">
+  <link rel="stylesheet" href="static/style.css?v=12">
+</head>
+<body>
+  <div class="noise"></div>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <img class="brand-logo" src="static/logo.svg?v=1" alt="">
+        <div><h1>octra</h1><p>node dashboard</p></div>
+      </div>
+      <div class="top-actions">
+        <div class="price-ticker" title="OCT price in USD via CoinGecko"><span>OCT</span><strong id="oct-price">$—</strong><small id="price-change">—</small></div>
+        <div class="pill"><span class="live-dot" id="live-dot"></span><span id="connection">connecting</span></div>
+        <div class="clock" id="clock">--:--:-- UTC</div>
+      </div>
+    </header>
+
+    <section class="hero" id="network">
+      <div class="hero-copy">
+        <div class="eyebrow" id="role-label">validator / devnet</div>
+        <h2>schwing's<br>node</h2>
+        <div class="epoch-row"><span class="epoch-label">epoch</span><strong id="epoch">—</strong></div>
+        <div class="identity"><span id="address">loading node identity…</span><button id="copy" title="Copy address">copy</button></div>
+      </div>
+      <div class="sync-card">
+        <div class="sync-ring" id="sync-ring"><div><strong id="peer-count">—</strong><small>peers</small></div></div>
+        <div><p id="sync-label">validator status</p><strong id="sync-state">checking</strong><small id="head-lag">reading validator set</small></div>
+      </div>
+    </section>
+
+    <section class="validator-strip" id="validator-strip">
+      <div class="validator-identity"><span class="validator-pulse"></span><div><strong id="validator-status">checking validator membership</strong><small id="voting-status">reading consensus state</small></div></div>
+      <dl>
+        <div class="reward-stat"><dt>rewards collected</dt><dd><span id="total-rewards">—</span> OCT</dd><small>validator rewards only</small></div>
+        <div><dt>bonded stake</dt><dd id="validator-bond">—</dd><small>effective voting power <span id="validator-weight">—</span></small></div>
+        <div><dt>quorum / set</dt><dd><span id="validator-quorum">—</span> / <span id="validator-set-size">—</span></dd><small>finalization threshold</small></div>
+      </dl>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="panel host-panel" id="system">
+        <div class="panel-title"><div><span>HOST HEALTH</span><small>octra-node</small></div></div>
+        <div class="gauges">
+          <div class="gauge"><div class="gauge-ring" id="memory-gauge"><strong id="memory-pct">—</strong></div><span>MEMORY</span><small id="memory-detail">—</small></div>
+          <div class="gauge"><div class="gauge-ring" id="disk-gauge"><strong id="disk-pct">—</strong></div><span>DISK</span><small id="disk-detail">—</small></div>
+        </div>
+        <div class="host-foot">
+          <span>load <b id="load">—</b></span>
+          <span>uptime <b id="uptime">—</b></span>
+          <span>epochs validated <b id="epochs-validated">—</b></span>
+          <span>as proposer <b id="epochs-proposed">—</b></span>
+        </div>
+        <div class="cpu-graph">
+          <div class="cpu-graph-head"><div><span>CPU USAGE</span><small>rolling 60-second utilization</small></div><strong id="cpu-pct">—</strong></div>
+          <canvas id="cpu-chart" aria-label="CPU usage over the last 60 seconds"></canvas>
+          <div class="cpu-axis"><span>60s ago</span><span>now</span></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="kpi-grid">
+      <article class="kpi"><div class="kpi-head"><span>ACCOUNTS</span><i class="purple"></i></div><strong id="accounts">—</strong><small id="active-accounts">— active</small></article>
+      <article class="kpi"><div class="kpi-head"><span>TX INDEX</span><i class="green"></i></div><strong id="tx-index">—</strong><small id="last-epoch-txs">— in last epoch</small></article>
+      <article class="kpi"><div class="kpi-head"><span>PEAK TPS</span><i class="amber"></i></div><strong id="peak-tps">—</strong><small id="epoch-time">— epoch execution</small></article>
+    </section>
+
+    <footer><span>OCTRA LITE NODE · LIVE TELEMETRY</span><span>REFRESH <b>2S</b></span></footer>
+  </main>
+  <script src="static/script.js?v=13"></script>
+</body>
+</html>
