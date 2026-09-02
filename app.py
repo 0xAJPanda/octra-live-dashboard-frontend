@@ -66,6 +66,7 @@ NETWORK_VALIDATOR_FIELDS = {
     "consensus_observed", "consensus_age_seconds", "continuity_pct",
     "first_observed_at", "last_observed_at",
 }
+PUBLIC_VALIDATOR_ADDRESS = re.compile(r"^oct[A-Za-z0-9]{40,80}$")
 
 STATIC_FILES = {
     "/": "index.html",
@@ -262,6 +263,26 @@ def build_network_snapshot(network_path: Path, stale_after_seconds: int) -> dict
     }
 
 
+def build_validator_snapshot(network_path: Path, stale_after_seconds: int, address: str) -> dict[str, Any] | None:
+    """Return one already-allowlisted public validator record, never collector internals."""
+    if not PUBLIC_VALIDATOR_ADDRESS.fullmatch(address):
+        return None
+    network = build_network_snapshot(network_path, stale_after_seconds)
+    validator = next((item for item in network["validators"] if item.get("address") == address), None)
+    if validator is None:
+        return None
+    return {
+        "schema": NETWORK_SCHEMA,
+        "fresh": network["fresh"],
+        "age_seconds": network["age_seconds"],
+        "observed_at": network["observed_at"],
+        "chain_id": network["chain_id"],
+        "scheduled": network["scheduled"],
+        "validator": validator,
+        "limitations": network["limitations"],
+    }
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "OctraDashboard/1.0"
 
@@ -273,10 +294,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path == "/api/network":
             self._serve_network()
             return
+        if path.startswith("/api/validators/"):
+            self._serve_validator(path.removeprefix("/api/validators/"))
+            return
         if path == "/healthz":
             self._send(200, b"ok\n", "text/plain; charset=utf-8", no_store=True)
             return
         filename = STATIC_FILES.get(path)
+        if filename is None and path.startswith("/validator/") and PUBLIC_VALIDATOR_ADDRESS.fullmatch(path.removeprefix("/validator/")):
+            filename = "index.html"
         if filename is None:
             self._send(404, b"not found\n", "text/plain; charset=utf-8", no_store=True)
             return
@@ -295,6 +321,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _serve_network(self) -> None:
         try:
             payload = build_network_snapshot(self.server.network_path, self.server.stale_after_seconds)
+            self._send(200, json.dumps(payload, separators=(",", ":")).encode(), "application/json", no_store=True)
+        except (FileNotFoundError, OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+            body = json.dumps({"fresh": False, "error": type(error).__name__}).encode()
+            self._send(503, body, "application/json", no_store=True)
+
+    def _serve_validator(self, address: str) -> None:
+        try:
+            payload = build_validator_snapshot(self.server.network_path, self.server.stale_after_seconds, address)
+            if payload is None:
+                self._send(404, b'{"error":"not found"}', "application/json", no_store=True)
+                return
             self._send(200, json.dumps(payload, separators=(",", ":")).encode(), "application/json", no_store=True)
         except (FileNotFoundError, OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
             body = json.dumps({"fresh": False, "error": type(error).__name__}).encode()

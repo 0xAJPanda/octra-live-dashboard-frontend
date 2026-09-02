@@ -4,6 +4,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -100,6 +101,25 @@ class ApiTests(unittest.TestCase):
             payload = json.load(response)
         self.assertEqual(payload["schema"], "octra-public-validator-network-v1")
         self.assertGreaterEqual(payload["summary"]["active_validators"], 1)
+
+    def test_validator_detail_api_returns_only_the_requested_public_record(self):
+        address = "oct8mvdkX3babyBsrzHYUB1cSU9a79RTbHXi7nJNfHJnUmk"
+        with urllib.request.urlopen(f"{self.base}/api/validators/{address}") as response:
+            payload = json.load(response)
+        self.assertEqual(payload["validator"]["address"], address)
+        self.assertNotIn("private_key", payload["validator"])
+        self.assertIn("limitations", payload)
+
+    def test_validator_detail_route_serves_the_single_page_app(self):
+        address = "oct8mvdkX3babyBsrzHYUB1cSU9a79RTbHXi7nJNfHJnUmk"
+        with urllib.request.urlopen(f"{self.base}/validator/{address}") as response:
+            html = response.read()
+        self.assertIn(b"Validator network", html)
+
+    def test_invalid_validator_detail_is_not_routed_or_looked_up(self):
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(f"{self.base}/api/validators/not-a-validator")
+        self.assertEqual(error.exception.code, 404)
 
 
 if __name__ == "__main__":

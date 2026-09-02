@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#ffffff">
   <title>AJPanda Octra Validator</title>
   <link rel="icon" href="static/logo.svg?v=1" type="image/svg+xml">
-  <link rel="stylesheet" href="static/style.css?v=12">
+  <link rel="stylesheet" href="static/style.css?v=13">
 </head>
 <body>
   <div class="noise"></div>
@@ -19,6 +19,7 @@
       <div class="top-actions">
         <div class="price-ticker" title="Octra devnet"><span>NETWORK</span><strong>DEVNET</strong></div>
         <div class="pill"><span class="live-dot" id="live-dot"></span><span id="connection">connecting</span></div>
+        <div class="refresh-state" id="refresh-state">updating…</div>
         <div class="clock" id="clock">--:--:-- UTC</div>
       </div>
     </header>
@@ -85,6 +86,12 @@
           <span><b id="network-total-weight">—</b> total weight</span>
         </div>
       </div>
+      <a class="local-spotlight" id="local-spotlight" href="#" hidden>
+        <span class="local-spotlight-label">our validator</span>
+        <strong id="local-spotlight-address">—</strong>
+        <span id="local-spotlight-state">Loading chain observation…</span>
+        <b>open validator stats →</b>
+      </a>
       <p id="network-remote-uptime-note" class="network-note">Remote host uptime is not available from the public validator-set RPC. Continuity is this dashboard’s active-set observation, not an availability guarantee.</p>
       <div class="table-wrap network-table-wrap">
         <table class="network-table">
@@ -94,8 +101,24 @@
       </div>
     </section>
 
-    <footer><span>OCTRA VALIDATOR · READ-ONLY TELEMETRY</span><span>REFRESH <b>10S</b></span></footer>
+    <section class="validator-detail" id="validator-detail" hidden aria-live="polite">
+      <a class="back-link" href="/">← all validators</a>
+      <p class="eyebrow">public validator profile</p>
+      <h3 id="detail-address">Loading validator…</h3>
+      <p id="detail-observed-at" class="network-meta">Fetching latest chain observation…</p>
+      <div class="detail-grid">
+        <article><small>set state</small><strong id="detail-state">—</strong></article>
+        <article><small>validator weight</small><strong id="detail-weight">—</strong></article>
+        <article><small>active-set share</small><strong id="detail-share">—</strong></article>
+        <article><small>observed continuity</small><strong id="detail-continuity">—</strong></article>
+        <article><small>recent consensus</small><strong id="detail-consensus">—</strong></article>
+        <article><small>first observed</small><strong id="detail-first-observed">—</strong></article>
+      </div>
+      <p id="detail-limitations" class="network-note"></p>
+    </section>
+
+    <footer><span>OCTRA VALIDATOR · READ-ONLY TELEMETRY</span><span>PAGE <b>10S</b> · NETWORK <b>30S</b></span></footer>
   </main>
-  <script src="static/script.js?v=13"></script>
+  <script src="static/script.js?v=14"></script>
 </body>
 </html>

@@ -1,6 +1,15 @@
 const $ = id => document.getElementById(id);
 const cpuHistory = [];
 let address = '';
+let snapshotBusy = false;
+let networkBusy = false;
+let snapshotFailures = 0;
+let networkFailures = 0;
+let refreshTimer;
+let networkTimer;
+const pageRefreshMs = 10_000;
+const networkRefreshMs = 30_000;
+const validatorAddress = decodeURIComponent(location.pathname.match(/^\/validator\/(oct[A-Za-z0-9]{40,80})$/)?.[1] || '');
 
 function num(value, digits = 0) {
   const number = Number(value);
@@ -156,6 +165,7 @@ function update(data) {
 
   $('connection').textContent = data.online ? 'LIVE' : 'DEGRADED';
   $('live-dot').className = `live-dot ${data.online ? 'online' : 'offline'}`;
+  $('refresh-state').textContent = `page updated ${num(data.age_seconds)}s ago`;
 }
 
 function isoTime(value) {
@@ -170,6 +180,27 @@ function networkCell(row, value, className = '') {
   row.appendChild(cell);
 }
 
+function validatorLink(address) {
+  const link = document.createElement('a');
+  link.href = `/validator/${encodeURIComponent(address)}`;
+  link.textContent = address;
+  link.className = 'validator-link';
+  return link;
+}
+
+function renderLocalSpotlight(validators) {
+  const local = validators.find(validator => validator.is_local === true);
+  const spotlight = $('local-spotlight');
+  if (!local) {
+    spotlight.hidden = true;
+    return;
+  }
+  spotlight.hidden = false;
+  spotlight.href = `/validator/${encodeURIComponent(local.address)}`;
+  $('local-spotlight-address').textContent = local.address;
+  $('local-spotlight-state').textContent = `${local.active ? 'active validator' : local.scheduled ? 'scheduled validator' : 'not in current set'} · weight ${num(local.weight)} · ${fixed(local.weight_share_pct)}% active-set share`;
+}
+
 function renderNetwork(network) {
   const summary = network.summary || {};
   const validators = Array.isArray(network.validators) ? network.validators : [];
@@ -179,6 +210,7 @@ function renderNetwork(network) {
   $('network-observed-at').textContent = network.fresh ? `Observed ${isoTime(network.observed_at)} · refreshed ${num(network.age_seconds)}s ago` : 'Network observation is stale; values may be outdated.';
   const limitations = network.limitations || {};
   $('network-remote-uptime-note').textContent = `${limitations.remote_uptime || 'Remote host uptime is not available.'} ${limitations.continuity || ''}`.trim();
+  renderLocalSpotlight(validators);
   const body = $('network-validator-rows');
   body.replaceChildren();
   if (!validators.length) {
@@ -191,7 +223,9 @@ function renderNetwork(network) {
   validators.forEach(validator => {
     const row = document.createElement('tr');
     if (validator.is_local === true) row.className = 'local-row';
-    networkCell(row, validator.address || 'unknown');
+    const addressCell = document.createElement('td');
+    addressCell.appendChild(validator.address ? validatorLink(validator.address) : document.createTextNode('unknown'));
+    row.appendChild(addressCell);
     const state = validator.active ? 'active' : validator.scheduled ? 'scheduled' : 'not active';
     networkCell(row, state, `network-state ${state === 'scheduled' ? 'scheduled' : ''}`);
     networkCell(row, num(validator.weight));
@@ -203,23 +237,82 @@ function renderNetwork(network) {
 }
 
 async function refresh() {
+  if (snapshotBusy) return;
+  snapshotBusy = true;
   try {
     const response = await fetch('/api/snapshot', { cache: 'no-store' });
     if (!response.ok) throw new Error(response.status);
     update(await response.json());
+    snapshotFailures = 0;
   } catch (error) {
     $('connection').textContent = 'OFFLINE';
     $('live-dot').className = 'live-dot offline';
+    $('refresh-state').textContent = 'page telemetry unavailable; retrying…';
+    snapshotFailures += 1;
+  } finally {
+    snapshotBusy = false;
+    scheduleSnapshotRefresh();
   }
 }
 
 async function refreshNetwork() {
+  if (networkBusy) return;
+  networkBusy = true;
   try {
     const response = await fetch('/api/network', { cache: 'no-store' });
     if (!response.ok) throw new Error(response.status);
     renderNetwork(await response.json());
+    networkFailures = 0;
   } catch (error) {
     $('network-observed-at').textContent = 'Network validator-set data is temporarily unavailable.';
+    networkFailures += 1;
+  } finally {
+    networkBusy = false;
+    scheduleNetworkRefresh();
+  }
+}
+
+function nextDelay(base, failures) {
+  const hiddenMultiplier = document.hidden ? 6 : 1;
+  return Math.min(base * (2 ** Math.min(failures, 3)) * hiddenMultiplier, 300_000);
+}
+
+function scheduleSnapshotRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(refresh, nextDelay(pageRefreshMs, snapshotFailures));
+}
+
+function scheduleNetworkRefresh() {
+  clearTimeout(networkTimer);
+  networkTimer = setTimeout(refreshNetwork, nextDelay(networkRefreshMs, networkFailures));
+}
+
+function renderValidatorDetail(data) {
+  const validator = data.validator || {};
+  $('validator-detail').hidden = false;
+  $('detail-address').textContent = validator.address || 'Unknown validator';
+  $('detail-observed-at').textContent = data.fresh ? `Observed ${isoTime(data.observed_at)} · refreshed ${num(data.age_seconds)}s ago` : 'Chain observation is stale; values may be outdated.';
+  $('detail-state').textContent = validator.active ? 'active' : validator.scheduled ? 'scheduled' : 'not active';
+  $('detail-weight').textContent = num(validator.weight);
+  $('detail-share').textContent = `${fixed(validator.weight_share_pct)}%`;
+  $('detail-continuity').textContent = Number.isFinite(Number(validator.continuity_pct)) ? `${fixed(validator.continuity_pct)}%` : 'collecting';
+  $('detail-consensus').textContent = validator.consensus_observed ? `observed${Number.isFinite(Number(validator.consensus_age_seconds)) ? ` · ${fixed(validator.consensus_age_seconds, 1)}s ago` : ''}` : 'not recently observed';
+  $('detail-first-observed').textContent = validator.first_observed_at ? isoTime(validator.first_observed_at) : 'collecting';
+  const limitations = data.limitations || {};
+  $('detail-limitations').textContent = `${limitations.remote_uptime || ''} ${limitations.continuity || ''}`.trim();
+  document.title = `${String(validator.address || 'Octra validator').slice(0, 16)}… · Octra Validator`;
+}
+
+async function loadValidatorDetail() {
+  if (!validatorAddress) return;
+  try {
+    const response = await fetch(`/api/validators/${encodeURIComponent(validatorAddress)}`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(response.status);
+    renderValidatorDetail(await response.json());
+  } catch (error) {
+    $('validator-detail').hidden = false;
+    $('detail-address').textContent = 'Validator profile unavailable';
+    $('detail-observed-at').textContent = 'This address is not in the currently observed public validator sets.';
   }
 }
 
@@ -235,9 +328,16 @@ function tick() {
 }
 
 window.addEventListener('resize', drawCPUChart);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    refresh();
+    refreshNetwork();
+    loadValidatorDetail();
+  }
+});
+window.addEventListener('focus', () => { refresh(); refreshNetwork(); loadValidatorDetail(); });
 tick();
 setInterval(tick, 1000);
 refresh();
 refreshNetwork();
-setInterval(refresh, 10000);
-setInterval(refreshNetwork, 30000);
+loadValidatorDetail();

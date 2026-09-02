@@ -76,6 +76,21 @@ controls/stat.sh
   -> browser dashboard
 ```
 
+## Refresh and validator profiles
+
+- The page refreshes local node telemetry every 10 seconds and the public
+  validator set every 30 seconds. Refreshes are immediate when a visitor
+  returns to the tab or window.
+- Failed reads back off (up to five minutes) rather than stacking requests;
+  the page displays a visible freshness indicator and marks unavailable data
+  as degraded.
+- Each observed public validator has a shareable profile at
+  `/validator/<public-validator-address>`. Profiles expose only chain-observed
+  set membership, weight, active-set share, recent consensus evidence, and
+  this dashboard's active-set continuity observation.
+- The local validator is highlighted on the explorer and its profile remains
+  public, but no remote host uptime is claimed or collected.
+
 ## Upstream
 
 UI derived from [gniwhcs/octra-live-dashboard-frontend](https://github.com/gniwhcs/octra-live-dashboard-frontend), MIT licensed.
