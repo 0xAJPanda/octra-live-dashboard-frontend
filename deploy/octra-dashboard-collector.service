@@ -1,0 +1,26 @@
+[Unit]
+Description=Collect allowlisted Octra validator telemetry
+After=network-online.target pm2-octra.service
+
+[Service]
+Type=oneshot
+User=octra
+Group=octra
+Environment=HOME=/home/octra
+Environment=PM2_HOME=/home/octra/.pm2
+Environment=OCTRA_STATUS_PATH=/var/lib/octra/dashboard/status.txt
+ExecStart=/usr/local/libexec/octra-dashboard-collector
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=read-only
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/octra/dashboard
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+IPAddressDeny=any
+IPAddressAllow=localhost

@@ -1,0 +1,57 @@
+services:
+  dashboard:
+    build: .
+    restart: unless-stopped
+    read_only: true
+    user: "65532:65532"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    network_mode: host
+    volumes:
+      - ${OCTRA_STATUS_DIR:-/var/lib/octra/dashboard}:/data:ro
+      - ./network-runtime:/network:ro
+    tmpfs:
+      - /tmp:size=8m,noexec,nosuid,nodev
+    command: ["--host", "127.0.0.1", "--port", "8789", "--status-file", "/data/status.txt", "--network-file", "/network/network.json", "--stale-after", "180"]
+
+  network-collector:
+    build: .
+    entrypoint: ["/bin/sh", "-ec"]
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    read_only: true
+    user: "${DASHBOARD_COLLECTOR_UID:-1000}:${DASHBOARD_COLLECTOR_GID:-1000}"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    network_mode: host
+    environment:
+      OCTRA_LOCAL_VALIDATOR_ADDRESS: oct8mvdkX3babyBsrzHYUB1cSU9a79RTbHXi7nJNfHJnUmk
+    volumes:
+      - ./network-runtime:/network
+    tmpfs:
+      - /tmp:size=8m,noexec,nosuid,nodev
+    command: ["while :; do python network_collector.py --rpc-url http://127.0.0.1:29080/rpc --local-address $${OCTRA_LOCAL_VALIDATOR_ADDRESS} --network-file /network/network.json --history-file /network/network-history.json; sleep 30; done"]
+
+  cloudflared:
+    image: cloudflare/cloudflared@sha256:404528c1cd63c3eb882c257ae524919e4376115e6fe57befca8d603656a91a4c
+    restart: unless-stopped
+    read_only: true
+    user: "65532:65532"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    network_mode: host
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    volumes:
+      - ${CLOUDFLARED_TOKEN_FILE:-/etc/octra-dashboard/cloudflared-token}:/run/secrets/cloudflared-token:ro
+    tmpfs:
+      - /tmp:size=8m,noexec,nosuid,nodev
+    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/cloudflared-token"]

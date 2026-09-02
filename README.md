@@ -1,39 +1,81 @@
-# Octra Live Dashboard Frontend
+# AJPanda Octra Validator Dashboard
 
-Frontend-only source for the live Octra validator dashboard at `octra-node.exe.xyz`.
+A safe, read-only deployment of the upstream Octra live dashboard frontend, adapted for our validator:
 
-![Octra](static/logo.svg)
+`oct8mvdkX3babyBsrzHYUB1cSU9a79RTbHXi7nJNfHJnUmk`
 
-## Included
+The original responsive UI is retained. A small dependency-free backend and host collector were added so the page can consume official `controls/stat.sh` output without exposing the node RPC, validator files, keys, IP addresses, or arbitrary host data.
 
-- Responsive dashboard markup
-- Live validator, staking, rewards, account, transaction, host, and consensus UI
-- CPU utilization chart
-- OCT/USD price ticker
-- Official Octra SVG logo and favicon
+## Security design
 
-No validator keys, wallet files, databases, backend code, or node data are included.
+- Binds to `127.0.0.1:8789` by default; it is not publicly reachable.
+- Collector and API use independent strict field allowlists.
+- No wallet, mnemonic, private key, recovery file, config file, environment, IP address, or SSH information is returned.
+- No third-party JavaScript, fonts, analytics, CDNs, or browser requests.
+- Strict Content Security Policy and browser hardening headers.
+- Container is read-only, non-root, capability-free, and uses `no-new-privileges`.
+- The container receives only a read-only telemetry file, never the Octra node directory.
+- Stale telemetry fails closed as `DEGRADED`.
 
-## Files
+The public validator address is intentionally displayed because it is already public chain identity.
 
-```text
-index.html
-static/
-  logo.svg
-  script.js
-  style.css
-```
-
-## Data source
-
-The frontend requests `GET /api/snapshot` from the same origin every two seconds. A compatible backend must return the live snapshot consumed by `static/script.js`.
-
-To use a separate API origin, update the URL in the `refresh()` function in `static/script.js` and configure CORS on that API.
-
-## Local preview
+## Run tests
 
 ```sh
-python3 -m http.server 8000
+cd /home/node/clawd/projects/octra-live-dashboard
+make test
 ```
 
-The layout will load at `http://localhost:8000`; live values require the snapshot API.
+## Collect live status
+
+```sh
+cd /home/node/clawd/projects/octra-live-dashboard
+sh ./collector.sh
+```
+
+For continuous collection, install the included hardened systemd timer:
+
+```sh
+sudo install -o root -g root -m 0755 collector.sh /usr/local/libexec/octra-dashboard-collector
+sudo install -d -o octra -g octra -m 0755 /var/lib/octra/dashboard
+sudo install -o root -g root -m 0644 deploy/octra-dashboard-collector.service /etc/systemd/system/
+sudo install -o root -g root -m 0644 deploy/octra-dashboard-collector.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now octra-dashboard-collector.timer
+```
+
+## Launch locally
+
+```sh
+cd /home/node/clawd/projects/octra-live-dashboard
+OCTRA_STATUS_DIR=/var/lib/octra/dashboard docker compose up -d --build
+curl -fsS http://127.0.0.1:8789/healthz
+```
+
+Open `http://127.0.0.1:8789` on node3 or use an SSH tunnel. Do not expose the port directly to the internet. If remote access is later required, put it behind an authenticated reverse proxy with TLS and an IP allowlist.
+
+## Cloudflare publication
+
+Production publication uses a dedicated Cloudflare Tunnel at
+`https://octra.ajpanda.com`. The origin stays bound to loopback and no inbound
+firewall port is opened. The connector reads its token from
+`/etc/octra-dashboard/cloudflared-token`; never commit or print this file.
+
+The public site exposes only the telemetry allowlist enforced independently by
+the collector and API. Cloudflare Access is not configured, so treat the
+hostname as public.
+
+## Data flow
+
+```text
+controls/stat.sh
+  -> collector allowlist
+  -> runtime/status.txt (read-only mount)
+  -> API allowlist and derived metrics
+  -> GET /api/snapshot
+  -> browser dashboard
+```
+
+## Upstream
+
+UI derived from [gniwhcs/octra-live-dashboard-frontend](https://github.com/gniwhcs/octra-live-dashboard-frontend), MIT licensed.

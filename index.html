@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#ffffff">
-  <title>schwing's node</title>
+  <title>AJPanda Octra Validator</title>
   <link rel="icon" href="static/logo.svg?v=1" type="image/svg+xml">
   <link rel="stylesheet" href="static/style.css?v=12">
 </head>
@@ -14,10 +14,10 @@
     <header class="topbar">
       <div class="brand">
         <img class="brand-logo" src="static/logo.svg?v=1" alt="">
-        <div><h1>octra</h1><p>node dashboard</p></div>
+        <div><h1>octra</h1><p>validator dashboard</p></div>
       </div>
       <div class="top-actions">
-        <div class="price-ticker" title="OCT price in USD via CoinGecko"><span>OCT</span><strong id="oct-price">$—</strong><small id="price-change">—</small></div>
+        <div class="price-ticker" title="Octra devnet"><span>NETWORK</span><strong>DEVNET</strong></div>
         <div class="pill"><span class="live-dot" id="live-dot"></span><span id="connection">connecting</span></div>
         <div class="clock" id="clock">--:--:-- UTC</div>
       </div>
@@ -26,7 +26,7 @@
     <section class="hero" id="network">
       <div class="hero-copy">
         <div class="eyebrow" id="role-label">validator / devnet</div>
-        <h2>schwing's<br>node</h2>
+        <h2>AJPanda<br>validator</h2>
         <div class="epoch-row"><span class="epoch-label">epoch</span><strong id="epoch">—</strong></div>
         <div class="identity"><span id="address">loading node identity…</span><button id="copy" title="Copy address">copy</button></div>
       </div>
@@ -39,9 +39,9 @@
     <section class="validator-strip" id="validator-strip">
       <div class="validator-identity"><span class="validator-pulse"></span><div><strong id="validator-status">checking validator membership</strong><small id="voting-status">reading consensus state</small></div></div>
       <dl>
-        <div class="reward-stat"><dt>rewards collected</dt><dd><span id="total-rewards">—</span> OCT</dd><small>validator rewards only</small></div>
-        <div><dt>bonded stake</dt><dd id="validator-bond">—</dd><small>effective voting power <span id="validator-weight">—</span></small></div>
-        <div><dt>quorum / set</dt><dd><span id="validator-quorum">—</span> / <span id="validator-set-size">—</span></dd><small>finalization threshold</small></div>
+        <div class="reward-stat"><dt>enrollment</dt><dd id="validator-enrollment">—</dd><small>committed validator state</small></div>
+        <div><dt>bonded stake</dt><dd id="validator-bond">—</dd><small>ready epoch <span id="ready-epoch">—</span></small></div>
+        <div><dt>consensus / p2p</dt><dd><span id="consensus-peer-count">—</span> / <span id="p2p-peer-count">—</span></dd><small>currently connected peers</small></div>
       </dl>
     </section>
 
@@ -55,8 +55,8 @@
         <div class="host-foot">
           <span>load <b id="load">—</b></span>
           <span>uptime <b id="uptime">—</b></span>
-          <span>epochs validated <b id="epochs-validated">—</b></span>
-          <span>as proposer <b id="epochs-proposed">—</b></span>
+          <span>process <b id="process-status">—</b></span>
+          <span>rpc <b id="rpc-status">—</b></span>
         </div>
         <div class="cpu-graph">
           <div class="cpu-graph-head"><div><span>CPU USAGE</span><small>rolling 60-second utilization</small></div><strong id="cpu-pct">—</strong></div>
@@ -69,10 +69,32 @@
     <section class="kpi-grid">
       <article class="kpi"><div class="kpi-head"><span>ACCOUNTS</span><i class="purple"></i></div><strong id="accounts">—</strong><small id="active-accounts">— active</small></article>
       <article class="kpi"><div class="kpi-head"><span>TX INDEX</span><i class="green"></i></div><strong id="tx-index">—</strong><small id="last-epoch-txs">— in last epoch</small></article>
-      <article class="kpi"><div class="kpi-head"><span>PEAK TPS</span><i class="amber"></i></div><strong id="peak-tps">—</strong><small id="epoch-time">— epoch execution</small></article>
+      <article class="kpi"><div class="kpi-head"><span>HEAD GAP</span><i class="amber"></i></div><strong id="head-gap-kpi">—</strong><small>process restarts <span id="restart-count">—</span></small></article>
     </section>
 
-    <footer><span>OCTRA LITE NODE · LIVE TELEMETRY</span><span>REFRESH <b>2S</b></span></footer>
+    <section class="network-explorer" aria-labelledby="network-explorer-title">
+      <div class="network-explorer-head">
+        <div>
+          <p class="eyebrow">public chain observation</p>
+          <h3 id="network-explorer-title">Validator network</h3>
+          <p id="network-observed-at" class="network-meta">Loading public validator-set proof…</p>
+        </div>
+        <div class="network-summary" aria-label="Network summary">
+          <span><b id="network-active-count">—</b> active</span>
+          <span><b id="network-scheduled-count">—</b> scheduled</span>
+          <span><b id="network-total-weight">—</b> total weight</span>
+        </div>
+      </div>
+      <p id="network-remote-uptime-note" class="network-note">Remote host uptime is not available from the public validator-set RPC. Continuity is this dashboard’s active-set observation, not an availability guarantee.</p>
+      <div class="table-wrap network-table-wrap">
+        <table class="network-table">
+          <thead><tr><th>validator</th><th>set state</th><th>weight</th><th>share</th><th>recent consensus</th><th>observed continuity</th></tr></thead>
+          <tbody id="network-validator-rows"><tr><td colspan="6">Loading validator set…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer><span>OCTRA VALIDATOR · READ-ONLY TELEMETRY</span><span>REFRESH <b>10S</b></span></footer>
   </main>
   <script src="static/script.js?v=13"></script>
 </body>

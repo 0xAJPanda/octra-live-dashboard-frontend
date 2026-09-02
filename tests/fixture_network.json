@@ -1,0 +1,28 @@
+{
+  "schema": "octra-public-validator-network-v1",
+  "observed_at": "2026-09-01T20:00:00+00:00",
+  "chain_id": "octra-devnet-9871-cluster",
+  "validator_set_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "summary": {
+    "active_validators": 1,
+    "scheduled_validators": 1,
+    "total_weight": 1000000,
+    "consensus_observed": 1
+  },
+  "scheduled": {"activation_epoch": 1440848},
+  "validators": [
+    {
+      "address": "oct8mvdkX3babyBsrzHYUB1cSU9a79RTbHXi7nJNfHJnUmk",
+      "weight": 1000000,
+      "weight_share_pct": 100.0,
+      "active": true,
+      "scheduled": true,
+      "is_local": true,
+      "consensus_observed": true,
+      "consensus_age_seconds": 1.5,
+      "continuity_pct": 100.0,
+      "first_observed_at": "2026-09-01T20:00:00+00:00",
+      "last_observed_at": "2026-09-01T20:00:00+00:00"
+    }
+  ]
+}

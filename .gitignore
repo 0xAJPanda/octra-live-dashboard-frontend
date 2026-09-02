@@ -1,2 +1,7 @@
 .DS_Store
 *.log
+runtime/
+.secrets/
+__pycache__/
+*.pyc
+network-runtime/
