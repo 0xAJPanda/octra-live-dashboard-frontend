@@ -115,6 +115,9 @@ class ApiTests(unittest.TestCase):
         with urllib.request.urlopen(f"{self.base}/validator/{address}") as response:
             html = response.read()
         self.assertIn(b"Validator network", html)
+        self.assertIn(b'href="/static/style.css', html)
+        self.assertIn(b'src="/static/script.js', html)
+        self.assertIn(b'src="/static/logo.svg', html)
 
     def test_invalid_validator_detail_is_not_routed_or_looked_up(self):
         with self.assertRaises(urllib.error.HTTPError) as error:
