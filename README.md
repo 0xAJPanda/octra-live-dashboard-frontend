@@ -16,6 +16,8 @@ The original responsive UI is retained. A small dependency-free backend and host
 - Container is read-only, non-root, capability-free, and uses `no-new-privileges`.
 - The container receives only a read-only telemetry file, never the Octra node directory.
 - Stale telemetry fails closed as `DEGRADED`.
+- Signed-upgrade telemetry is collected by a separate diagnostic-only job; it
+  never passes `--apply`, and paths, PIDs, config, and keys are discarded.
 
 The public validator address is intentionally displayed because it is already public chain identity.
 
@@ -31,17 +33,22 @@ make test
 ```sh
 cd /home/node/clawd/projects/octra-live-dashboard
 sh ./collector.sh
+sudo -iu octra sh ./transition_collector.sh
 ```
 
 For continuous collection, install the included hardened systemd timer:
 
 ```sh
 sudo install -o root -g root -m 0755 collector.sh /usr/local/libexec/octra-dashboard-collector
+sudo install -o root -g root -m 0755 transition_collector.sh /usr/local/libexec/octra-dashboard-transition-collector
 sudo install -d -o octra -g octra -m 0755 /var/lib/octra/dashboard
 sudo install -o root -g root -m 0644 deploy/octra-dashboard-collector.service /etc/systemd/system/
 sudo install -o root -g root -m 0644 deploy/octra-dashboard-collector.timer /etc/systemd/system/
+sudo install -o root -g root -m 0644 deploy/octra-dashboard-transition-collector.service /etc/systemd/system/
+sudo install -o root -g root -m 0644 deploy/octra-dashboard-transition-collector.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now octra-dashboard-collector.timer
+sudo systemctl enable --now octra-dashboard-transition-collector.timer
 ```
 
 ## Launch locally
@@ -74,7 +81,27 @@ controls/stat.sh
   -> API allowlist and derived metrics
   -> GET /api/snapshot
   -> browser dashboard
+
+controls/upgrade.sh (diagnostic only; never --apply)
+  -> transition collector allowlist
+  -> upgrade.txt (read-only mount)
+  -> fail-closed GET /api/transition
+  -> mainnet transition readiness panel
 ```
+
+## Transition readiness semantics
+
+The transition panel checks the signed release sequence, diagnostic pass gate,
+binary/source/runtime matches, RPC, head lag, voting, and validator-set
+membership. Missing or stale evidence is a blocker. The panel intentionally
+hard-codes `cutover_authorized: false`: even when every upgrade gate passes,
+operators must wait for the official signed mainnet configuration and an
+explicit cutover decision.
+
+The transition collector runs every five minutes because the diagnostic may
+fetch the official repository/release marker. Its systemd service therefore
+allows outbound network access while retaining a read-only system, no-new-
+privileges, private devices/tmp, and a single writable telemetry directory.
 
 ## Refresh and validator profiles
 

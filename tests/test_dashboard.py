@@ -9,11 +9,12 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from app import DashboardHandler, build_snapshot, is_enabled, parse_status
+from app import DashboardHandler, build_snapshot, build_transition_snapshot, is_enabled, parse_status
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixture_status.txt"
+UPGRADE_FIXTURE = ROOT / "tests" / "fixture_upgrade.txt"
 
 
 class SnapshotTests(unittest.TestCase):
@@ -45,12 +46,65 @@ class SnapshotTests(unittest.TestCase):
         self.assertFalse(snapshot["online"])
         self.assertIn("telemetry is stale", snapshot["health"]["warnings"])
 
+    def test_transition_snapshot_fails_closed_when_upgrade_is_required(self):
+        transition = build_transition_snapshot(UPGRADE_FIXTURE, stale_after_seconds=31_536_000)
+        self.assertEqual(transition["state"], "upgrade_required")
+        self.assertFalse(transition["ready"])
+        self.assertFalse(transition["cutover_authorized"])
+        self.assertEqual(transition["release"]["sequence"], 12)
+        self.assertEqual(transition["runtime"]["lag"], 0)
+        self.assertIn("signed upgrade has not been fully applied", transition["blockers"])
+        serialized = json.dumps(transition)
+        self.assertNotIn("/opt/octra", serialized)
+        self.assertNotIn("data_dir", serialized)
+        self.assertNotIn("935422", serialized)
+
+    def test_transition_snapshot_is_ready_only_when_every_upgrade_gate_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            upgrade = Path(directory) / "upgrade.txt"
+            upgrade.write_text(
+                "\n".join([
+                    "sequence = 12",
+                    "action = none",
+                    "release_published = True",
+                    "upgrade_available = False",
+                    "binary_match = True",
+                    "source_match = True",
+                    "runtime_match = True",
+                    "rpc = ready",
+                    "lag = 0",
+                    "voting = True",
+                    "validator_member = True",
+                    "validator_scheduled = True",
+                    "status = pass",
+                    "gate = upgrade_diagnostic",
+                ]),
+                encoding="utf-8",
+            )
+            transition = build_transition_snapshot(upgrade, stale_after_seconds=180)
+        self.assertTrue(transition["ready"])
+        self.assertEqual(transition["state"], "upgrade_current")
+        self.assertEqual(transition["blockers"], [])
+        self.assertFalse(transition["cutover_authorized"])
+
+    def test_stale_transition_telemetry_is_a_blocker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            upgrade = Path(directory) / "upgrade.txt"
+            upgrade.write_text("action = none\nupgrade_available = False\n", encoding="utf-8")
+            old = time.time() - 600
+            import os
+            os.utime(upgrade, (old, old))
+            transition = build_transition_snapshot(upgrade, stale_after_seconds=180)
+        self.assertFalse(transition["ready"])
+        self.assertIn("upgrade telemetry is stale", transition["blockers"])
+
 
 class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), DashboardHandler)
         cls.server.status_path = FIXTURE
+        cls.server.upgrade_path = UPGRADE_FIXTURE
         cls.server.network_path = ROOT / "tests" / "fixture_network.json"
         cls.server.stale_after_seconds = 31_536_000
         cls.server.project_dir = ROOT
@@ -92,6 +146,13 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="network-validator-rows"', html)
         self.assertIn('id="network-remote-uptime-note"', html)
 
+    def test_transition_panel_is_rendered_from_the_read_only_api(self):
+        script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("/api/transition", script)
+        self.assertIn('id="transition-state"', html)
+        self.assertIn('id="transition-blockers"', html)
+
     def test_health_endpoint(self):
         with urllib.request.urlopen(f"{self.base}/healthz") as response:
             self.assertEqual(response.read(), b"ok\n")
@@ -101,6 +162,13 @@ class ApiTests(unittest.TestCase):
             payload = json.load(response)
         self.assertEqual(payload["schema"], "octra-public-validator-network-v1")
         self.assertGreaterEqual(payload["summary"]["active_validators"], 1)
+
+    def test_transition_endpoint_is_read_only_and_fail_closed(self):
+        with urllib.request.urlopen(f"{self.base}/api/transition") as response:
+            payload = json.load(response)
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(payload["state"], "upgrade_required")
+        self.assertFalse(payload["cutover_authorized"])
 
     def test_validator_detail_api_returns_only_the_requested_public_record(self):
         address = "oct8mvdkX3babyBsrzHYUB1cSU9a79RTbHXi7nJNfHJnUmk"

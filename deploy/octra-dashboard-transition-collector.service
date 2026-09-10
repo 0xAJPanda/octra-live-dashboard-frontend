@@ -1,0 +1,26 @@
+[Unit]
+Description=Collect allowlisted Octra signed-upgrade readiness
+After=network-online.target pm2-octra.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=octra
+Group=octra
+Environment=HOME=/home/octra
+Environment=PM2_HOME=/home/octra/.pm2
+Environment=OCTRA_UPGRADE_PATH=/var/lib/octra/dashboard/upgrade.txt
+ExecStart=/usr/local/libexec/octra-dashboard-transition-collector
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=read-only
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/octra/dashboard
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+

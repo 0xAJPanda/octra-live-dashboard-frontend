@@ -3,6 +3,7 @@ const cpuHistory = [];
 let address = '';
 let snapshotBusy = false;
 let networkBusy = false;
+let transitionBusy = false;
 let snapshotFailures = 0;
 let networkFailures = 0;
 let refreshTimer;
@@ -173,6 +174,40 @@ function isoTime(value) {
   return Number.isNaN(date.getTime()) ? 'unknown time' : date.toISOString().replace('T', ' ').replace('.000Z', ' UTC');
 }
 
+function renderTransition(transition) {
+  const release = transition.release || {};
+  const runtime = transition.runtime || {};
+  const blockers = Array.isArray(transition.blockers) ? transition.blockers : [];
+  const labels = {
+    upgrade_required: 'UPGRADE REQUIRED',
+    upgrade_current: 'UPGRADE CURRENT',
+    degraded: 'NOT READY',
+    unavailable: 'UNAVAILABLE',
+  };
+  $('transition-panel').className = `transition-panel ${transition.ready ? 'ready' : 'blocked'}`;
+  $('transition-state').textContent = labels[transition.state] || 'CHECKING';
+  $('transition-sequence').textContent = release.sequence === undefined || release.sequence === null ? '—' : `sequence ${num(release.sequence)}`;
+  $('transition-expires').textContent = release.expires_at ? isoTime(release.expires_at) : 'not reported';
+  $('transition-matches').textContent = [runtime.binary_match, runtime.source_match, runtime.runtime_match].map(value => value ? 'pass' : 'fail').join(' / ');
+  $('transition-runtime').textContent = `${num(runtime.lag)} epochs / ${runtime.voting ? 'voting' : 'not voting'}`;
+  $('transition-blockers').textContent = blockers.length ? blockers.join(' · ') : 'All signed upgrade readiness gates pass.';
+  $('transition-note').textContent = transition.cutover_note || 'Readiness telemetry never authorizes cutover.';
+}
+
+async function refreshTransition() {
+  if (transitionBusy) return;
+  transitionBusy = true;
+  try {
+    const response = await fetch('/api/transition', { cache: 'no-store' });
+    if (!response.ok) throw new Error(response.status);
+    renderTransition(await response.json());
+  } catch (error) {
+    renderTransition({ state: 'unavailable', ready: false, blockers: ['signed upgrade telemetry is unavailable'] });
+  } finally {
+    transitionBusy = false;
+  }
+}
+
 function networkCell(row, value, className = '') {
   const cell = document.createElement('td');
   cell.textContent = value;
@@ -332,12 +367,14 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     refresh();
     refreshNetwork();
+    refreshTransition();
     loadValidatorDetail();
   }
 });
-window.addEventListener('focus', () => { refresh(); refreshNetwork(); loadValidatorDetail(); });
+window.addEventListener('focus', () => { refresh(); refreshNetwork(); refreshTransition(); loadValidatorDetail(); });
 tick();
 setInterval(tick, 1000);
 refresh();
 refreshNetwork();
+refreshTransition();
 loadValidatorDetail();

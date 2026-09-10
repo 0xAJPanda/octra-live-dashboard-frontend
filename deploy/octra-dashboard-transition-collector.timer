@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh Octra signed-upgrade readiness
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=5m
+AccuracySec=30s
+Persistent=true
+Unit=octra-dashboard-transition-collector.service
+
+[Install]
+WantedBy=timers.target

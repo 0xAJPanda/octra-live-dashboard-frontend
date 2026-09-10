@@ -67,6 +67,13 @@ NETWORK_VALIDATOR_FIELDS = {
     "first_observed_at", "last_observed_at",
 }
 PUBLIC_VALIDATOR_ADDRESS = re.compile(r"^oct[A-Za-z0-9]{40,80}$")
+TRANSITION_TOKEN = re.compile(r"\b([A-Za-z][A-Za-z0-9_]*)\s*=\s*([^\s]+)")
+TRANSITION_FIELDS = {
+    "sequence", "action", "public_commit", "source_commit", "expires_at",
+    "binary_match", "source_match", "runtime_match", "rpc", "head_epoch",
+    "peer_epoch", "lag", "voting", "validator_member", "validator_scheduled",
+    "release_published", "upgrade_available", "status", "gate",
+}
 
 STATIC_FILES = {
     "/": "index.html",
@@ -98,6 +105,16 @@ def parse_status(output: str) -> dict[str, Any]:
         match = STATUS_LINE.fullmatch(line.strip())
         if match and match.group(1) in PUBLIC_FIELDS:
             parsed[match.group(1)] = parse_scalar(match.group(2))
+    return parsed
+
+
+def parse_transition_status(output: str) -> dict[str, Any]:
+    """Parse only public, single-token upgrade diagnostics from noisy tool output."""
+    parsed: dict[str, Any] = {}
+    for line in output.splitlines():
+        for key, value in TRANSITION_TOKEN.findall(line):
+            if key in TRANSITION_FIELDS:
+                parsed[key] = parse_scalar(value)
     return parsed
 
 
@@ -221,6 +238,70 @@ def build_snapshot(status_path: Path, stale_after_seconds: int) -> dict[str, Any
     }
 
 
+def build_transition_snapshot(upgrade_path: Path, stale_after_seconds: int) -> dict[str, Any]:
+    """Build a fail-closed readiness view; this never authorizes a mainnet cutover."""
+    modified_at = upgrade_path.stat().st_mtime
+    age_seconds = max(0, int(time.time() - modified_at))
+    status = parse_transition_status(upgrade_path.read_text(encoding="utf-8"))
+    blockers: list[str] = []
+
+    if age_seconds > stale_after_seconds:
+        blockers.append("upgrade telemetry is stale")
+    if status.get("status") != "pass" or status.get("gate") != "upgrade_diagnostic":
+        blockers.append("signed upgrade diagnostic pass gate is missing")
+    if status.get("release_published") is not True:
+        blockers.append("signed release marker is not published")
+
+    upgrade_incomplete = (
+        status.get("upgrade_available") is not False
+        or status.get("action") != "none"
+        or any(status.get(field) is not True for field in ("binary_match", "source_match", "runtime_match"))
+    )
+    if upgrade_incomplete:
+        blockers.append("signed upgrade has not been fully applied")
+    if status.get("rpc") != "ready":
+        blockers.append("validator RPC is not ready")
+    lag = status.get("lag")
+    if not isinstance(lag, int) or lag > 2:
+        blockers.append("validator is not aligned with the network head")
+    if status.get("voting") is not True:
+        blockers.append("validator is not voting")
+    if status.get("validator_member") is not True or status.get("validator_scheduled") is not True:
+        blockers.append("validator set membership is not ready")
+
+    ready = not blockers
+    upgrade_required = status.get("upgrade_available") is True or status.get("action") in {"upgrade", "required"}
+    return {
+        "schema": "octra-transition-readiness-v1",
+        "observed_at": datetime.fromtimestamp(modified_at, timezone.utc).isoformat(),
+        "age_seconds": age_seconds,
+        "fresh": age_seconds <= stale_after_seconds,
+        "ready": ready,
+        "state": "upgrade_required" if upgrade_required else "upgrade_current" if ready else "degraded",
+        "blockers": blockers,
+        "release": {
+            "sequence": status.get("sequence"),
+            "action": status.get("action"),
+            "public_commit": status.get("public_commit"),
+            "source_commit": status.get("source_commit"),
+            "expires_at": status.get("expires_at"),
+            "published": status.get("release_published") is True,
+        },
+        "runtime": {
+            "binary_match": status.get("binary_match") is True,
+            "source_match": status.get("source_match") is True,
+            "runtime_match": status.get("runtime_match") is True,
+            "rpc": status.get("rpc"),
+            "lag": lag,
+            "voting": status.get("voting") is True,
+            "validator_member": status.get("validator_member") is True,
+            "validator_scheduled": status.get("validator_scheduled") is True,
+        },
+        "cutover_authorized": False,
+        "cutover_note": "Readiness telemetry never authorizes cutover; wait for signed official mainnet configuration and operator approval.",
+    }
+
+
 def build_network_snapshot(network_path: Path, stale_after_seconds: int) -> dict[str, Any]:
     modified_at = network_path.stat().st_mtime
     age_seconds = max(0, int(time.time() - modified_at))
@@ -294,6 +375,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path == "/api/network":
             self._serve_network()
             return
+        if path == "/api/transition":
+            self._serve_transition()
+            return
         if path.startswith("/api/validators/"):
             self._serve_validator(path.removeprefix("/api/validators/"))
             return
@@ -324,6 +408,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(payload, separators=(",", ":")).encode(), "application/json", no_store=True)
         except (FileNotFoundError, OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
             body = json.dumps({"fresh": False, "error": type(error).__name__}).encode()
+            self._send(503, body, "application/json", no_store=True)
+
+    def _serve_transition(self) -> None:
+        try:
+            payload = build_transition_snapshot(self.server.upgrade_path, self.server.stale_after_seconds)
+            self._send(200, json.dumps(payload, separators=(",", ":")).encode(), "application/json", no_store=True)
+        except (FileNotFoundError, OSError, UnicodeError) as error:
+            body = json.dumps({
+                "ready": False,
+                "state": "unavailable",
+                "cutover_authorized": False,
+                "error": type(error).__name__,
+            }).encode()
             self._send(503, body, "application/json", no_store=True)
 
     def _serve_validator(self, address: str) -> None:
@@ -361,6 +458,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=8789)
     parser.add_argument("--status-file", type=Path, default=Path("/data/status.txt"))
     parser.add_argument("--network-file", type=Path, default=Path("/data/network.json"))
+    parser.add_argument("--upgrade-file", type=Path, default=Path("/data/upgrade.txt"))
     parser.add_argument("--stale-after", type=int, default=180)
     return parser.parse_args()
 
@@ -370,6 +468,7 @@ def main() -> None:
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
     server.status_path = args.status_file
     server.network_path = args.network_file
+    server.upgrade_path = args.upgrade_file
     server.stale_after_seconds = args.stale_after
     server.project_dir = Path(__file__).resolve().parent
     print(f"Octra dashboard listening on http://{args.host}:{args.port}", flush=True)
