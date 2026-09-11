@@ -18,6 +18,8 @@ The original responsive UI is retained. A small dependency-free backend and host
 - Stale telemetry fails closed as `DEGRADED`.
 - Signed-upgrade telemetry is collected by a separate diagnostic-only job; it
   never passes `--apply`, and paths, PIDs, config, and keys are discarded.
+- Disk runway uses only used/free byte totals, keeps a bounded history, requires
+  six hours of evidence, and never runs pruning, recovery, or storage commands.
 
 The public validator address is intentionally displayed because it is already public chain identity.
 
@@ -40,6 +42,8 @@ For continuous collection, install the included hardened systemd timer:
 
 ```sh
 sudo install -o root -g root -m 0755 collector.sh /usr/local/libexec/octra-dashboard-collector
+sudo install -o root -g root -m 0644 network_collector.py /usr/local/libexec/network_collector.py
+sudo install -o root -g root -m 0644 storage_collector.py /usr/local/libexec/storage_collector.py
 sudo install -o root -g root -m 0755 transition_collector.sh /usr/local/libexec/octra-dashboard-transition-collector
 sudo install -d -o octra -g octra -m 0755 /var/lib/octra/dashboard
 sudo install -o root -g root -m 0644 deploy/octra-dashboard-collector.service /etc/systemd/system/
@@ -87,7 +91,23 @@ controls/upgrade.sh (diagnostic only; never --apply)
   -> upgrade.txt (read-only mount)
   -> fail-closed GET /api/transition
   -> mainnet transition readiness panel
+
+disk_used + disk_free (already allowlisted by collector)
+  -> bounded storage-history.json (atomic, maximum 20,160 samples)
+  -> conservative net-growth estimate
+  -> GET /api/storage
+  -> disk runway panel (observation only)
 ```
+
+## Disk runway semantics
+
+The collector retains at most 14 days at a one-minute collection interval. The
+dashboard requires four valid samples spanning at least six hours before it
+shows a forecast. It estimates recent net growth using medians from the early
+and late halves of the evidence window, then projects to a safety reserve equal
+to the larger of 15% capacity or 100 GiB. Sparse, stale, malformed, or non-
+growing evidence never produces a deadline. The panel does not recommend or
+execute pruning because recovery and storage procedures remain release-specific.
 
 ## Transition readiness semantics
 

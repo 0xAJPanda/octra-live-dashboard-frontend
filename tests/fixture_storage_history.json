@@ -1,0 +1,9 @@
+{
+  "schema": "octra-storage-history-v1",
+  "samples": [
+    {"observed_at": "2026-09-09T00:00:00Z", "used_bytes": 536870912000, "free_bytes": 1073741824000},
+    {"observed_at": "2026-09-09T08:00:00Z", "used_bytes": 545460846592, "free_bytes": 1065151889408},
+    {"observed_at": "2026-09-09T16:00:00Z", "used_bytes": 554050781184, "free_bytes": 1056561954816},
+    {"observed_at": "2026-09-10T00:00:00Z", "used_bytes": 562640715776, "free_bytes": 1047972020224}
+  ]
+}

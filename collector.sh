@@ -31,6 +31,11 @@ mv "$TEMP_STATUS" "$STATUS_PATH"
 trap - EXIT HUP INT TERM
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+STORAGE_HISTORY_PATH=${OCTRA_STORAGE_HISTORY_PATH:-"$STATUS_DIR/storage-history.json"}
+python3 "$SCRIPT_DIR/storage_collector.py" \
+  --status-file "$STATUS_PATH" \
+  --history-file "$STORAGE_HISTORY_PATH"
+
 NETWORK_PATH=${OCTRA_NETWORK_PATH:-"$STATUS_DIR/network.json"}
 HISTORY_PATH=${OCTRA_HISTORY_PATH:-"$STATUS_DIR/network-history.json"}
 RPC_URL=${OCTRA_RPC_URL:-http://127.0.0.1:29080/rpc}

@@ -7,6 +7,7 @@ import argparse
 import json
 import mimetypes
 import re
+import statistics
 import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -61,6 +62,7 @@ PUBLIC_FIELDS = {
 }
 
 NETWORK_SCHEMA = "octra-public-validator-network-v1"
+STORAGE_HISTORY_SCHEMA = "octra-storage-history-v1"
 NETWORK_VALIDATOR_FIELDS = {
     "address", "weight", "weight_share_pct", "active", "scheduled", "is_local",
     "consensus_observed", "consensus_age_seconds", "continuity_pct",
@@ -302,6 +304,95 @@ def build_transition_snapshot(upgrade_path: Path, stale_after_seconds: int) -> d
     }
 
 
+def _parse_utc(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(timezone.utc) if parsed.tzinfo else None
+
+
+def build_storage_snapshot(
+    history_path: Path,
+    stale_after_seconds: int,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Build a conservative disk runway estimate from sanitized capacity history."""
+    raw = json.loads(history_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or raw.get("schema") != STORAGE_HISTORY_SCHEMA:
+        raise ValueError("unsupported storage history schema")
+
+    samples: list[tuple[datetime, int, int]] = []
+    for item in raw.get("samples", [])[-20_160:] if isinstance(raw.get("samples"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        observed = _parse_utc(item.get("observed_at"))
+        used = item.get("used_bytes")
+        free = item.get("free_bytes")
+        if observed and isinstance(used, int) and isinstance(free, int) and used >= 0 and free >= 0 and used + free > 0:
+            samples.append((observed, used, free))
+    samples.sort(key=lambda item: item[0])
+    if not samples:
+        raise ValueError("storage history has no valid samples")
+
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    latest_time, latest_used, latest_free = samples[-1]
+    age_seconds = max(0, int((current_time - latest_time).total_seconds()))
+    total = latest_used + latest_free
+    reserve = min(total, max(round(total * 0.15), 100 * 1024**3))
+    span_seconds = max(0.0, (latest_time - samples[0][0]).total_seconds())
+    base = {
+        "schema": "octra-storage-runway-v1",
+        "observed_at": latest_time.isoformat(),
+        "age_seconds": age_seconds,
+        "used_bytes": latest_used,
+        "free_bytes": latest_free,
+        "total_bytes": total,
+        "used_pct": round(latest_used / total * 100, 2),
+        "reserve_bytes": reserve,
+        "growth_bytes_per_second": None,
+        "growth_gib_per_day": None,
+        "days_to_reserve": None,
+        "forecast_available": False,
+        "evidence": {"samples": len(samples), "span_hours": round(span_seconds / 3600, 1)},
+    }
+    if age_seconds > stale_after_seconds:
+        return base | {"state": "stale", "message": "Storage telemetry is stale; no runway is shown."}
+    if len(samples) < 4 or span_seconds < 6 * 3600:
+        return base | {"state": "insufficient_data", "message": "Collecting at least six hours of disk history."}
+
+    midpoint = len(samples) // 2
+    early = samples[:midpoint]
+    late = samples[midpoint:]
+    early_used = statistics.median(item[1] for item in early)
+    late_used = statistics.median(item[1] for item in late)
+    early_time = statistics.median(item[0].timestamp() for item in early)
+    late_time = statistics.median(item[0].timestamp() for item in late)
+    rate = (late_used - early_used) / max(1.0, late_time - early_time)
+    if rate < 1024**2 / 3600:
+        return base | {
+            "state": "stable",
+            "growth_bytes_per_second": 0,
+            "growth_gib_per_day": 0.0,
+            "message": "No sustained disk growth is visible in the evidence window.",
+        }
+
+    usable_free = max(0, latest_free - reserve)
+    days = usable_free / rate / 86_400
+    state = "critical" if latest_free <= reserve or days < 7 else "warning" if days < 14 else "watch" if days < 30 else "healthy"
+    return base | {
+        "state": state,
+        "forecast_available": True,
+        "growth_bytes_per_second": round(rate, 2),
+        "growth_gib_per_day": round(rate * 86_400 / 1024**3, 2),
+        "days_to_reserve": round(days, 1),
+        "message": "Projection uses recent net disk growth and preserves the larger of 15% or 100 GiB free.",
+    }
+
+
 def build_network_snapshot(network_path: Path, stale_after_seconds: int) -> dict[str, Any]:
     modified_at = network_path.stat().st_mtime
     age_seconds = max(0, int(time.time() - modified_at))
@@ -378,6 +469,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path == "/api/transition":
             self._serve_transition()
             return
+        if path == "/api/storage":
+            self._serve_storage()
+            return
         if path.startswith("/api/validators/"):
             self._serve_validator(path.removeprefix("/api/validators/"))
             return
@@ -423,6 +517,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             }).encode()
             self._send(503, body, "application/json", no_store=True)
 
+    def _serve_storage(self) -> None:
+        try:
+            payload = build_storage_snapshot(self.server.storage_history_path, self.server.stale_after_seconds * 5)
+            self._send(200, json.dumps(payload, separators=(",", ":")).encode(), "application/json", no_store=True)
+        except (FileNotFoundError, OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+            body = json.dumps({
+                "schema": "octra-storage-runway-v1",
+                "state": "unavailable",
+                "forecast_available": False,
+                "error": type(error).__name__,
+            }).encode()
+            self._send(503, body, "application/json", no_store=True)
+
     def _serve_validator(self, address: str) -> None:
         try:
             payload = build_validator_snapshot(self.server.network_path, self.server.stale_after_seconds, address)
@@ -459,6 +566,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--status-file", type=Path, default=Path("/data/status.txt"))
     parser.add_argument("--network-file", type=Path, default=Path("/data/network.json"))
     parser.add_argument("--upgrade-file", type=Path, default=Path("/data/upgrade.txt"))
+    parser.add_argument("--storage-history-file", type=Path, default=Path("/data/storage-history.json"))
     parser.add_argument("--stale-after", type=int, default=180)
     return parser.parse_args()
 
@@ -469,6 +577,7 @@ def main() -> None:
     server.status_path = args.status_file
     server.network_path = args.network_file
     server.upgrade_path = args.upgrade_file
+    server.storage_history_path = args.storage_history_file
     server.stale_after_seconds = args.stale_after
     server.project_dir = Path(__file__).resolve().parent
     print(f"Octra dashboard listening on http://{args.host}:{args.port}", flush=True)

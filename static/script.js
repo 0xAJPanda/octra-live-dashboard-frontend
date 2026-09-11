@@ -4,12 +4,15 @@ let address = '';
 let snapshotBusy = false;
 let networkBusy = false;
 let transitionBusy = false;
+let storageBusy = false;
 let snapshotFailures = 0;
 let networkFailures = 0;
 let refreshTimer;
 let networkTimer;
+let storageTimer;
 const pageRefreshMs = 10_000;
 const networkRefreshMs = 30_000;
+const storageRefreshMs = 60_000;
 const validatorAddress = decodeURIComponent(location.pathname.match(/^\/validator\/(oct[A-Za-z0-9]{40,80})$/)?.[1] || '');
 
 function num(value, digits = 0) {
@@ -34,9 +37,9 @@ function usdPrice(value) {
 function bytes(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return '—';
-  const units = ['B', 'GB', 'TB'];
-  const index = number > 1e12 ? 2 : number > 1e9 ? 1 : 0;
-  return `${(number / Math.pow(1000, index * 3)).toFixed(index ? 1 : 0)} ${units[index]}`;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const index = number > 0 ? Math.min(units.length - 1, Math.floor(Math.log(number) / Math.log(1000))) : 0;
+  return `${(number / Math.pow(1000, index)).toFixed(index ? 1 : 0)} ${units[index]}`;
 }
 
 function duration(seconds) {
@@ -208,6 +211,43 @@ async function refreshTransition() {
   }
 }
 
+function renderStorage(storage) {
+  const labels = {
+    healthy: 'HEALTHY',
+    watch: 'WATCH',
+    warning: 'WARNING',
+    critical: 'CRITICAL',
+    stable: 'STABLE',
+    insufficient_data: 'COLLECTING',
+    stale: 'STALE',
+    unavailable: 'UNAVAILABLE',
+  };
+  $('storage-panel').className = `storage-panel ${storage.state || 'unavailable'}`;
+  $('storage-state').textContent = labels[storage.state] || 'CHECKING';
+  $('storage-free').textContent = bytes(storage.free_bytes);
+  $('storage-growth').textContent = storage.growth_gib_per_day === null || storage.growth_gib_per_day === undefined ? '—' : `${fixed(storage.growth_gib_per_day, 1)} GiB`;
+  $('storage-runway').textContent = storage.forecast_available ? `${fixed(storage.days_to_reserve, 1)} days` : storage.state === 'stable' ? 'stable' : '—';
+  const evidence = storage.evidence || {};
+  $('storage-evidence').textContent = Number.isFinite(Number(evidence.span_hours)) ? `${fixed(evidence.span_hours, 1)}h · ${num(evidence.samples)} samples` : '—';
+  $('storage-message').textContent = `${storage.message || 'Storage runway telemetry is unavailable.'} Observation only; no pruning or recovery is automatic.`;
+}
+
+async function refreshStorage() {
+  if (storageBusy) return;
+  storageBusy = true;
+  try {
+    const response = await fetch('/api/storage', { cache: 'no-store' });
+    if (!response.ok) throw new Error(response.status);
+    renderStorage(await response.json());
+  } catch (error) {
+    renderStorage({ state: 'unavailable', forecast_available: false });
+  } finally {
+    storageBusy = false;
+    clearTimeout(storageTimer);
+    storageTimer = setTimeout(refreshStorage, document.hidden ? storageRefreshMs * 6 : storageRefreshMs);
+  }
+}
+
 function networkCell(row, value, className = '') {
   const cell = document.createElement('td');
   cell.textContent = value;
@@ -368,13 +408,15 @@ document.addEventListener('visibilitychange', () => {
     refresh();
     refreshNetwork();
     refreshTransition();
+    refreshStorage();
     loadValidatorDetail();
   }
 });
-window.addEventListener('focus', () => { refresh(); refreshNetwork(); refreshTransition(); loadValidatorDetail(); });
+window.addEventListener('focus', () => { refresh(); refreshNetwork(); refreshTransition(); refreshStorage(); loadValidatorDetail(); });
 tick();
 setInterval(tick, 1000);
 refresh();
 refreshNetwork();
 refreshTransition();
+refreshStorage();
 loadValidatorDetail();

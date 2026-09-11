@@ -14,7 +14,7 @@ services:
       - ./network-runtime:/network:ro
     tmpfs:
       - /tmp:size=8m,noexec,nosuid,nodev
-    command: ["--host", "127.0.0.1", "--port", "8789", "--status-file", "/data/status.txt", "--upgrade-file", "/data/upgrade.txt", "--network-file", "/network/network.json", "--stale-after", "180"]
+    command: ["--host", "127.0.0.1", "--port", "8789", "--status-file", "/data/status.txt", "--upgrade-file", "/data/upgrade.txt", "--storage-history-file", "/data/storage-history.json", "--network-file", "/network/network.json", "--stale-after", "180"]
 
   network-collector:
     build: .

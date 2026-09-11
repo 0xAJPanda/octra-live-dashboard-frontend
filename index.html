@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#ffffff">
   <title>AJPanda Octra Validator</title>
   <link rel="icon" href="/static/logo.svg?v=2" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/style.css?v=16">
+  <link rel="stylesheet" href="/static/style.css?v=17">
 </head>
 <body>
   <div class="noise"></div>
@@ -59,6 +59,20 @@
       </div>
       <p class="transition-blockers" id="transition-blockers">Reading the signed upgrade diagnostic…</p>
       <p class="transition-note" id="transition-note">This dashboard is observation-only and never authorizes a cutover.</p>
+    </section>
+
+    <section class="storage-panel" id="storage-panel" aria-labelledby="storage-title">
+      <div class="storage-head">
+        <div><p class="eyebrow">capacity forecast</p><h3 id="storage-title">Disk runway</h3></div>
+        <strong id="storage-state">collecting</strong>
+      </div>
+      <div class="storage-grid">
+        <div><small>free now</small><b id="storage-free">—</b></div>
+        <div><small>net growth / day</small><b id="storage-growth">—</b></div>
+        <div><small>runway to reserve</small><b id="storage-runway">—</b></div>
+        <div><small>evidence window</small><b id="storage-evidence">—</b></div>
+      </div>
+      <p id="storage-message" class="storage-message">Collecting sanitized disk-capacity history. No automatic pruning or recovery actions are performed.</p>
     </section>
 
     <section class="dashboard-grid">
@@ -134,6 +148,6 @@
 
     <footer><span>OCTRA VALIDATOR · READ-ONLY TELEMETRY</span><span>PAGE <b>10S</b> · NETWORK <b>30S</b></span></footer>
   </main>
-  <script src="/static/script.js?v=16"></script>
+  <script src="/static/script.js?v=17"></script>
 </body>
 </html>

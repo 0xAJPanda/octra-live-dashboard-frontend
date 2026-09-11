@@ -15,6 +15,7 @@ from app import DashboardHandler, build_snapshot, build_transition_snapshot, is_
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixture_status.txt"
 UPGRADE_FIXTURE = ROOT / "tests" / "fixture_upgrade.txt"
+STORAGE_FIXTURE = ROOT / "tests" / "fixture_storage_history.json"
 
 
 class SnapshotTests(unittest.TestCase):
@@ -106,6 +107,7 @@ class ApiTests(unittest.TestCase):
         cls.server.status_path = FIXTURE
         cls.server.upgrade_path = UPGRADE_FIXTURE
         cls.server.network_path = ROOT / "tests" / "fixture_network.json"
+        cls.server.storage_history_path = STORAGE_FIXTURE
         cls.server.stale_after_seconds = 31_536_000
         cls.server.project_dir = ROOT
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -153,6 +155,13 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="transition-state"', html)
         self.assertIn('id="transition-blockers"', html)
 
+    def test_storage_runway_panel_is_rendered_from_the_read_only_api(self):
+        script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("/api/storage", script)
+        self.assertIn('id="storage-state"', html)
+        self.assertIn('id="storage-runway"', html)
+
     def test_health_endpoint(self):
         with urllib.request.urlopen(f"{self.base}/healthz") as response:
             self.assertEqual(response.read(), b"ok\n")
@@ -169,6 +178,16 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(payload["state"], "upgrade_required")
         self.assertFalse(payload["cutover_authorized"])
+
+    def test_storage_endpoint_returns_only_derived_capacity_data(self):
+        with urllib.request.urlopen(f"{self.base}/api/storage") as response:
+            payload = json.load(response)
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(payload["schema"], "octra-storage-runway-v1")
+        self.assertIn(payload["state"], {"healthy", "watch", "warning", "critical"})
+        serialized = json.dumps(payload)
+        self.assertNotIn("private_key", serialized)
+        self.assertNotIn("path", serialized)
 
     def test_validator_detail_api_returns_only_the_requested_public_record(self):
         address = "oct8mvdkX3babyBsrzHYUB1cSU9a79RTbHXi7nJNfHJnUmk"
