@@ -5,14 +5,17 @@ let snapshotBusy = false;
 let networkBusy = false;
 let transitionBusy = false;
 let storageBusy = false;
+let reliabilityBusy = false;
 let snapshotFailures = 0;
 let networkFailures = 0;
 let refreshTimer;
 let networkTimer;
 let storageTimer;
+let reliabilityTimer;
 const pageRefreshMs = 10_000;
 const networkRefreshMs = 30_000;
 const storageRefreshMs = 60_000;
+const reliabilityRefreshMs = 60_000;
 const validatorAddress = decodeURIComponent(location.pathname.match(/^\/validator\/(oct[A-Za-z0-9]{40,80})$/)?.[1] || '');
 
 function num(value, digits = 0) {
@@ -248,6 +251,34 @@ async function refreshStorage() {
   }
 }
 
+function renderReliability(reliability) {
+  const labels = { healthy: 'HEALTHY', degraded: 'DEGRADED', collecting: 'COLLECTING', stale: 'STALE', unavailable: 'UNAVAILABLE' };
+  $('reliability-panel').className = `reliability-panel ${reliability.state || 'unavailable'}`;
+  $('reliability-state').textContent = labels[reliability.state] || 'CHECKING';
+  $('reliability-health').textContent = Number.isFinite(Number(reliability.observed_health_pct)) ? `${fixed(reliability.observed_health_pct)}%` : '—';
+  $('reliability-voting').textContent = Number.isFinite(Number(reliability.voting_observed_pct)) ? `${fixed(reliability.voting_observed_pct)}%` : '—';
+  $('reliability-coverage').textContent = Number.isFinite(Number(reliability.coverage_pct)) ? `${fixed(reliability.coverage_pct)}%` : '—';
+  const streak = Number(reliability.current_healthy_streak_minutes);
+  $('reliability-streak').textContent = Number.isFinite(streak) ? `${duration(streak * 60)} / ${num(reliability.restart_delta)} restarts` : '—';
+  $('reliability-message').textContent = `${reliability.message || 'Reliability observations are unavailable.'} ${reliability.limitations || 'Local observation only; not independently measured uptime.'}`;
+}
+
+async function refreshReliability() {
+  if (reliabilityBusy) return;
+  reliabilityBusy = true;
+  try {
+    const response = await fetch('/api/reliability', { cache: 'no-store' });
+    if (!response.ok) throw new Error(response.status);
+    renderReliability(await response.json());
+  } catch (error) {
+    renderReliability({ state: 'unavailable' });
+  } finally {
+    reliabilityBusy = false;
+    clearTimeout(reliabilityTimer);
+    reliabilityTimer = setTimeout(refreshReliability, document.hidden ? reliabilityRefreshMs * 6 : reliabilityRefreshMs);
+  }
+}
+
 function networkCell(row, value, className = '') {
   const cell = document.createElement('td');
   cell.textContent = value;
@@ -409,14 +440,16 @@ document.addEventListener('visibilitychange', () => {
     refreshNetwork();
     refreshTransition();
     refreshStorage();
+    refreshReliability();
     loadValidatorDetail();
   }
 });
-window.addEventListener('focus', () => { refresh(); refreshNetwork(); refreshTransition(); refreshStorage(); loadValidatorDetail(); });
+window.addEventListener('focus', () => { refresh(); refreshNetwork(); refreshTransition(); refreshStorage(); refreshReliability(); loadValidatorDetail(); });
 tick();
 setInterval(tick, 1000);
 refresh();
 refreshNetwork();
 refreshTransition();
 refreshStorage();
+refreshReliability();
 loadValidatorDetail();

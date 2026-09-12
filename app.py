@@ -63,6 +63,7 @@ PUBLIC_FIELDS = {
 
 NETWORK_SCHEMA = "octra-public-validator-network-v1"
 STORAGE_HISTORY_SCHEMA = "octra-storage-history-v1"
+RELIABILITY_HISTORY_SCHEMA = "octra-validator-reliability-history-v1"
 NETWORK_VALIDATOR_FIELDS = {
     "address", "weight", "weight_share_pct", "active", "scheduled", "is_local",
     "consensus_observed", "consensus_age_seconds", "continuity_pct",
@@ -393,6 +394,105 @@ def build_storage_snapshot(
     }
 
 
+def build_reliability_snapshot(
+    history_path: Path,
+    stale_after_seconds: int,
+    *,
+    sample_interval_seconds: int = 60,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Summarize local observations without overstating them as service uptime."""
+    raw = json.loads(history_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or raw.get("schema") != RELIABILITY_HISTORY_SCHEMA:
+        raise ValueError("unsupported reliability history schema")
+    interval = max(1, sample_interval_seconds)
+    valid: dict[datetime, dict[str, Any]] = {}
+    for item in raw.get("samples", [])[-10_080:] if isinstance(raw.get("samples"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        observed = _parse_utc(item.get("observed_at"))
+        epoch = item.get("epoch")
+        restarts = item.get("restarts")
+        booleans = ("healthy", "online", "rpc_ready", "voting", "active")
+        if (
+            observed
+            and isinstance(epoch, int) and epoch >= 0
+            and isinstance(restarts, int) and restarts >= 0
+            and all(isinstance(item.get(field), bool) for field in booleans)
+        ):
+            valid[observed] = item
+    samples = sorted(valid.items(), key=lambda pair: pair[0])
+    if not samples:
+        raise ValueError("reliability history has no valid samples")
+
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    latest_time = samples[-1][0]
+    window_start = latest_time.timestamp() - 86_400
+    samples = [pair for pair in samples if pair[0].timestamp() >= window_start]
+    span_seconds = max(0.0, (latest_time - samples[0][0]).total_seconds())
+    age_seconds = max(0, int((current_time - latest_time).total_seconds()))
+    expected = max(1, round(span_seconds / interval) + 1)
+    coverage = min(100.0, len(samples) / expected * 100)
+    observed_health = sum(1 for _, item in samples if item["healthy"]) / len(samples) * 100
+    voting_observed = sum(1 for _, item in samples if item["voting"]) / len(samples) * 100
+
+    positive_restarts = 0
+    for (_, previous), (_, current) in zip(samples, samples[1:]):
+        positive_restarts += max(0, current["restarts"] - previous["restarts"])
+
+    longest_unhealthy = 0
+    unhealthy_run = 0
+    for _, item in samples:
+        unhealthy_run = 0 if item["healthy"] else unhealthy_run + 1
+        longest_unhealthy = max(longest_unhealthy, unhealthy_run)
+
+    streak_start = latest_time
+    if samples[-1][1]["healthy"]:
+        streak_start = samples[-1][0]
+        for index in range(len(samples) - 2, -1, -1):
+            gap = (samples[index + 1][0] - samples[index][0]).total_seconds()
+            if not samples[index][1]["healthy"] or gap > interval * 2.5:
+                break
+            streak_start = samples[index][0]
+    streak_minutes = round((latest_time - streak_start).total_seconds() / 60) if samples[-1][1]["healthy"] else 0
+
+    evidence_ready = len(samples) >= 4 and span_seconds >= 6 * 3600
+    if age_seconds > stale_after_seconds:
+        state = "stale"
+        message = "Reliability observations are stale; recent continuity is unknown."
+    elif not samples[-1][1]["healthy"]:
+        state = "degraded"
+        message = "The current validator observation is unhealthy."
+    elif not evidence_ready:
+        state = "collecting"
+        message = "Collecting at least six hours of local validator observations."
+    elif coverage < 90:
+        state = "degraded"
+        message = "Observation coverage is incomplete; continuity may be understated or missed."
+    elif observed_health < 99.5:
+        state = "degraded"
+        message = "One or more unhealthy validator observations occurred in the evidence window."
+    else:
+        state = "healthy"
+        message = "All sampled validator checks were healthy in the evidence window."
+
+    return {
+        "schema": "octra-validator-reliability-v1",
+        "state": state,
+        "observed_at": latest_time.isoformat(),
+        "age_seconds": age_seconds,
+        "observed_health_pct": round(observed_health, 2),
+        "voting_observed_pct": round(voting_observed, 2),
+        "coverage_pct": round(coverage, 2),
+        "current_healthy_streak_minutes": streak_minutes,
+        "longest_observed_unhealthy_minutes": longest_unhealthy * round(interval / 60),
+        "restart_delta": positive_restarts,
+        "evidence": {"samples": len(samples), "span_hours": round(span_seconds / 3600, 1), "window_hours": 24},
+        "message": message,
+        "limitations": "Local sampled observation, not independently measured uptime or a rewards guarantee.",
+    }
+
+
 def build_network_snapshot(network_path: Path, stale_after_seconds: int) -> dict[str, Any]:
     modified_at = network_path.stat().st_mtime
     age_seconds = max(0, int(time.time() - modified_at))
@@ -472,6 +572,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path == "/api/storage":
             self._serve_storage()
             return
+        if path == "/api/reliability":
+            self._serve_reliability()
+            return
         if path.startswith("/api/validators/"):
             self._serve_validator(path.removeprefix("/api/validators/"))
             return
@@ -530,6 +633,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
             }).encode()
             self._send(503, body, "application/json", no_store=True)
 
+    def _serve_reliability(self) -> None:
+        try:
+            payload = build_reliability_snapshot(
+                self.server.reliability_history_path,
+                self.server.stale_after_seconds * 5,
+                sample_interval_seconds=self.server.reliability_interval_seconds,
+            )
+            self._send(200, json.dumps(payload, separators=(",", ":")).encode(), "application/json", no_store=True)
+        except (FileNotFoundError, OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+            body = json.dumps({
+                "schema": "octra-validator-reliability-v1",
+                "state": "unavailable",
+                "error": type(error).__name__,
+            }).encode()
+            self._send(503, body, "application/json", no_store=True)
+
     def _serve_validator(self, address: str) -> None:
         try:
             payload = build_validator_snapshot(self.server.network_path, self.server.stale_after_seconds, address)
@@ -567,6 +686,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--network-file", type=Path, default=Path("/data/network.json"))
     parser.add_argument("--upgrade-file", type=Path, default=Path("/data/upgrade.txt"))
     parser.add_argument("--storage-history-file", type=Path, default=Path("/data/storage-history.json"))
+    parser.add_argument("--reliability-history-file", type=Path, default=Path("/data/reliability-history.json"))
+    parser.add_argument("--reliability-interval", type=int, default=60)
     parser.add_argument("--stale-after", type=int, default=180)
     return parser.parse_args()
 
@@ -578,6 +699,8 @@ def main() -> None:
     server.network_path = args.network_file
     server.upgrade_path = args.upgrade_file
     server.storage_history_path = args.storage_history_file
+    server.reliability_history_path = args.reliability_history_file
+    server.reliability_interval_seconds = args.reliability_interval
     server.stale_after_seconds = args.stale_after
     server.project_dir = Path(__file__).resolve().parent
     print(f"Octra dashboard listening on http://{args.host}:{args.port}", flush=True)

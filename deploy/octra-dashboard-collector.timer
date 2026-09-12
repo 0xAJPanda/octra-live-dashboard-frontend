@@ -3,11 +3,10 @@ Description=Refresh Octra validator dashboard telemetry
 
 [Timer]
 OnBootSec=30s
-OnUnitActiveSec=30s
+OnUnitActiveSec=60s
 AccuracySec=5s
 Persistent=true
 Unit=octra-dashboard-collector.service
 
 [Install]
 WantedBy=timers.target
-

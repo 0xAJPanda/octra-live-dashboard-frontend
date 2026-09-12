@@ -75,6 +75,20 @@
       <p id="storage-message" class="storage-message">Collecting sanitized disk-capacity history. No automatic pruning or recovery actions are performed.</p>
     </section>
 
+    <section class="reliability-panel" id="reliability-panel" aria-labelledby="reliability-title">
+      <div class="reliability-head">
+        <div><p class="eyebrow">24-hour evidence</p><h3 id="reliability-title">Validator reliability</h3></div>
+        <strong id="reliability-state">collecting</strong>
+      </div>
+      <div class="reliability-grid">
+        <div><small>healthy observations</small><b id="reliability-health">—</b></div>
+        <div><small>voting observed</small><b id="reliability-voting">—</b></div>
+        <div><small>observation coverage</small><b id="reliability-coverage">—</b></div>
+        <div><small>healthy streak / restarts</small><b id="reliability-streak">—</b></div>
+      </div>
+      <p id="reliability-message" class="reliability-message">Collecting sampled local health evidence. This is not independently measured uptime.</p>
+    </section>
+
     <section class="dashboard-grid">
       <article class="panel host-panel" id="system">
         <div class="panel-title"><div><span>HOST HEALTH</span><small>octra-node</small></div></div>

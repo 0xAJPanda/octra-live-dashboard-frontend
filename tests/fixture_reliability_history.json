@@ -1,0 +1,12 @@
+{
+  "schema": "octra-validator-reliability-history-v1",
+  "samples": [
+    {"observed_at":"2026-09-10T00:00:00Z","healthy":true,"online":true,"rpc_ready":true,"voting":true,"active":true,"epoch":1500000,"restarts":0},
+    {"observed_at":"2026-09-10T01:00:00Z","healthy":true,"online":true,"rpc_ready":true,"voting":true,"active":true,"epoch":1500060,"restarts":0},
+    {"observed_at":"2026-09-10T02:00:00Z","healthy":true,"online":true,"rpc_ready":true,"voting":true,"active":true,"epoch":1500120,"restarts":0},
+    {"observed_at":"2026-09-10T03:00:00Z","healthy":true,"online":true,"rpc_ready":true,"voting":true,"active":true,"epoch":1500180,"restarts":0},
+    {"observed_at":"2026-09-10T04:00:00Z","healthy":true,"online":true,"rpc_ready":true,"voting":true,"active":true,"epoch":1500240,"restarts":0},
+    {"observed_at":"2026-09-10T05:00:00Z","healthy":true,"online":true,"rpc_ready":true,"voting":true,"active":true,"epoch":1500300,"restarts":0},
+    {"observed_at":"2026-09-10T06:00:00Z","healthy":true,"online":true,"rpc_ready":true,"voting":true,"active":true,"epoch":1500360,"restarts":0}
+  ]
+}

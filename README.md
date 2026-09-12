@@ -20,6 +20,8 @@ The original responsive UI is retained. A small dependency-free backend and host
   never passes `--apply`, and paths, PIDs, config, and keys are discarded.
 - Disk runway uses only used/free byte totals, keeps a bounded history, requires
   six hours of evidence, and never runs pruning, recovery, or storage commands.
+- Reliability history stores only coarse health booleans, epoch, and restart
+  count; it never stores validator identity, logs, paths, peers, or keys.
 
 The public validator address is intentionally displayed because it is already public chain identity.
 
@@ -44,6 +46,7 @@ For continuous collection, install the included hardened systemd timer:
 sudo install -o root -g root -m 0755 collector.sh /usr/local/libexec/octra-dashboard-collector
 sudo install -o root -g root -m 0644 network_collector.py /usr/local/libexec/network_collector.py
 sudo install -o root -g root -m 0644 storage_collector.py /usr/local/libexec/storage_collector.py
+sudo install -o root -g root -m 0644 reliability_collector.py /usr/local/libexec/reliability_collector.py
 sudo install -o root -g root -m 0755 transition_collector.sh /usr/local/libexec/octra-dashboard-transition-collector
 sudo install -d -o octra -g octra -m 0755 /var/lib/octra/dashboard
 sudo install -o root -g root -m 0644 deploy/octra-dashboard-collector.service /etc/systemd/system/
@@ -97,7 +100,21 @@ disk_used + disk_free (already allowlisted by collector)
   -> conservative net-growth estimate
   -> GET /api/storage
   -> disk runway panel (observation only)
+
+process + RPC + sync + voting + active + epoch + restart count
+  -> bounded reliability-history.json (atomic, maximum 10,080 samples)
+  -> GET /api/reliability
+  -> 24-hour sampled reliability panel (observation only)
 ```
+
+## Reliability semantics
+
+The collector retains at most seven days at a one-minute interval. The panel
+summarizes the latest 24 hours and requires six hours of evidence before it can
+report healthy. It shows observed health, voting observations, collection
+coverage, the current healthy streak, and positive restart-counter changes.
+Missing coverage and stale evidence fail closed. These are local sampled
+observations—not independently measured uptime, proof of rewards, or an SLA.
 
 ## Disk runway semantics
 
