@@ -27,8 +27,64 @@ class ReliabilitySnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["coverage_pct"], 100.0)
         self.assertEqual(snapshot["current_healthy_streak_minutes"], 360)
         self.assertEqual(snapshot["restart_delta"], 0)
+        self.assertEqual(snapshot["epoch_progress"]["state"], "progressing")
+        self.assertEqual(snapshot["epoch_progress"]["epoch_delta"], 360)
+        self.assertEqual(snapshot["epoch_progress"]["seconds_since_change"], 0)
         self.assertIn("observation", snapshot["limitations"].lower())
         self.assertNotIn("uptime_pct", snapshot)
+
+    def test_healthy_flags_fail_closed_when_epoch_stops_advancing(self):
+        payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        for sample in payload["samples"]:
+            sample["epoch"] = 1_500_000
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            snapshot = build_reliability_snapshot(
+                path,
+                stale_after_seconds=7200,
+                sample_interval_seconds=3600,
+                stall_after_seconds=3 * 3600,
+                now=datetime(2026, 9, 10, 6, 1, tzinfo=timezone.utc),
+            )
+        self.assertEqual(snapshot["state"], "degraded")
+        self.assertEqual(snapshot["epoch_progress"]["state"], "stalled")
+        self.assertEqual(snapshot["epoch_progress"]["seconds_since_change"], 6 * 3600)
+        self.assertIn("epoch has not changed", snapshot["message"].lower())
+
+    def test_short_unchanged_window_collects_before_declaring_a_stall(self):
+        payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        payload["samples"] = payload["samples"][:2]
+        payload["samples"][1]["epoch"] = payload["samples"][0]["epoch"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            snapshot = build_reliability_snapshot(
+                path,
+                stale_after_seconds=7200,
+                sample_interval_seconds=3600,
+                stall_after_seconds=3 * 3600,
+                now=datetime(2026, 9, 10, 1, 1, tzinfo=timezone.utc),
+            )
+        self.assertEqual(snapshot["state"], "collecting")
+        self.assertEqual(snapshot["epoch_progress"]["state"], "collecting")
+
+    def test_a_collection_gap_makes_progress_unknown_instead_of_claiming_a_stall(self):
+        payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        payload["samples"] = [payload["samples"][0], payload["samples"][-1]]
+        payload["samples"][-1]["epoch"] = payload["samples"][0]["epoch"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            snapshot = build_reliability_snapshot(
+                path,
+                stale_after_seconds=7200,
+                sample_interval_seconds=3600,
+                stall_after_seconds=3 * 3600,
+                now=datetime(2026, 9, 10, 6, 1, tzinfo=timezone.utc),
+            )
+        self.assertEqual(snapshot["state"], "degraded")
+        self.assertEqual(snapshot["epoch_progress"]["state"], "unknown")
 
     def test_unhealthy_samples_and_restarts_are_visible(self):
         payload = json.loads(FIXTURE.read_text(encoding="utf-8"))

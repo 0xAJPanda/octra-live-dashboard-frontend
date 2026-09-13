@@ -257,6 +257,10 @@ function renderReliability(reliability) {
   $('reliability-state').textContent = labels[reliability.state] || 'CHECKING';
   $('reliability-health').textContent = Number.isFinite(Number(reliability.observed_health_pct)) ? `${fixed(reliability.observed_health_pct)}%` : '—';
   $('reliability-voting').textContent = Number.isFinite(Number(reliability.voting_observed_pct)) ? `${fixed(reliability.voting_observed_pct)}%` : '—';
+  const progress = reliability.epoch_progress || {};
+  const progressLabels = { progressing: 'ADVANCING', stalled: 'STALLED', collecting: 'COLLECTING', unknown: 'UNKNOWN' };
+  const progressAge = Number(progress.seconds_since_change);
+  $('reliability-progress').textContent = `${progressLabels[progress.state] || 'UNAVAILABLE'}${Number.isFinite(progressAge) ? ` · ${duration(progressAge)}` : ''}`;
   $('reliability-coverage').textContent = Number.isFinite(Number(reliability.coverage_pct)) ? `${fixed(reliability.coverage_pct)}%` : '—';
   const streak = Number(reliability.current_healthy_streak_minutes);
   $('reliability-streak').textContent = Number.isFinite(streak) ? `${duration(streak * 60)} / ${num(reliability.restart_delta)} restarts` : '—';

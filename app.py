@@ -399,6 +399,7 @@ def build_reliability_snapshot(
     stale_after_seconds: int,
     *,
     sample_interval_seconds: int = 60,
+    stall_after_seconds: int = 15 * 60,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Summarize local observations without overstating them as service uptime."""
@@ -456,6 +457,46 @@ def build_reliability_snapshot(
             streak_start = samples[index][0]
     streak_minutes = round((latest_time - streak_start).total_seconds() / 60) if samples[-1][1]["healthy"] else 0
 
+    # A process can report healthy and voting while consensus has stopped moving.
+    # Only classify a stall across a continuous observation tail; gaps are
+    # unknown evidence rather than proof that the epoch was stationary.
+    continuous_start = len(samples) - 1
+    for index in range(len(samples) - 2, -1, -1):
+        gap = (samples[index + 1][0] - samples[index][0]).total_seconds()
+        if gap > interval * 2.5:
+            break
+        continuous_start = index
+    continuous = samples[continuous_start:]
+    continuous_span = max(0.0, (latest_time - continuous[0][0]).total_seconds())
+    stall_after = max(interval * 2, stall_after_seconds)
+    last_change_at = continuous[0][0]
+    last_advance_at: datetime | None = None
+    for (_, previous), (current_sample_time, current) in zip(continuous, continuous[1:]):
+        if current["epoch"] != previous["epoch"]:
+            last_change_at = current_sample_time
+        if current["epoch"] > previous["epoch"]:
+            last_advance_at = current_sample_time
+    seconds_since_change = max(0, round((latest_time - last_change_at).total_seconds()))
+    if continuous_start > 0 and len(continuous) < 2:
+        progress_state = "unknown"
+    elif continuous_span < stall_after:
+        progress_state = "collecting"
+    elif seconds_since_change >= stall_after:
+        progress_state = "stalled"
+    elif last_advance_at is not None:
+        progress_state = "progressing"
+    else:
+        progress_state = "collecting"
+    epoch_progress = {
+        "state": progress_state,
+        "latest_epoch": samples[-1][1]["epoch"],
+        "epoch_delta": samples[-1][1]["epoch"] - samples[0][1]["epoch"],
+        "last_advance_at": last_advance_at.isoformat() if last_advance_at else None,
+        "seconds_since_change": seconds_since_change,
+        "continuous_observation_minutes": round(continuous_span / 60),
+        "stall_after_minutes": round(stall_after / 60),
+    }
+
     evidence_ready = len(samples) >= 4 and span_seconds >= 6 * 3600
     if age_seconds > stale_after_seconds:
         state = "stale"
@@ -463,6 +504,12 @@ def build_reliability_snapshot(
     elif not samples[-1][1]["healthy"]:
         state = "degraded"
         message = "The current validator observation is unhealthy."
+    elif progress_state == "stalled":
+        state = "degraded"
+        message = f"The validator epoch has not changed for {round(seconds_since_change / 60)} observed minutes."
+    elif progress_state == "unknown":
+        state = "degraded"
+        message = "Recent collection continuity is insufficient to verify consensus progression."
     elif not evidence_ready:
         state = "collecting"
         message = "Collecting at least six hours of local validator observations."
@@ -487,6 +534,7 @@ def build_reliability_snapshot(
         "current_healthy_streak_minutes": streak_minutes,
         "longest_observed_unhealthy_minutes": longest_unhealthy * round(interval / 60),
         "restart_delta": positive_restarts,
+        "epoch_progress": epoch_progress,
         "evidence": {"samples": len(samples), "span_hours": round(span_seconds / 3600, 1), "window_hours": 24},
         "message": message,
         "limitations": "Local sampled observation, not independently measured uptime or a rewards guarantee.",

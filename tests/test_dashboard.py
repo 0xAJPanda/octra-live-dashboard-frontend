@@ -171,6 +171,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn("/api/reliability", script)
         self.assertIn('id="reliability-state"', html)
         self.assertIn('id="reliability-coverage"', html)
+        self.assertIn('id="reliability-progress"', html)
 
     def test_health_endpoint(self):
         with urllib.request.urlopen(f"{self.base}/healthz") as response:
@@ -205,6 +206,7 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(payload["schema"], "octra-validator-reliability-v1")
         self.assertEqual(payload["state"], "healthy")
+        self.assertEqual(payload["epoch_progress"]["state"], "progressing")
         serialized = json.dumps(payload)
         self.assertNotIn('"samples": [', serialized)
         self.assertNotIn("address", serialized)

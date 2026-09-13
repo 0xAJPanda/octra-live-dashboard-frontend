@@ -113,6 +113,9 @@ The collector retains at most seven days at a one-minute interval. The panel
 summarizes the latest 24 hours and requires six hours of evidence before it can
 report healthy. It shows observed health, voting observations, collection
 coverage, the current healthy streak, and positive restart-counter changes.
+It also proves that the observed epoch is advancing and degrades after 15
+continuous minutes without a change, even if the process still reports healthy
+and voting. Observation gaps produce an unknown state instead of a false stall.
 Missing coverage and stale evidence fail closed. These are local sampled
 observations—not independently measured uptime, proof of rewards, or an SLA.
 
