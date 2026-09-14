@@ -241,7 +241,12 @@ def build_snapshot(status_path: Path, stale_after_seconds: int) -> dict[str, Any
     }
 
 
-def build_transition_snapshot(upgrade_path: Path, stale_after_seconds: int) -> dict[str, Any]:
+def build_transition_snapshot(
+    upgrade_path: Path,
+    stale_after_seconds: int,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
     """Build a fail-closed readiness view; this never authorizes a mainnet cutover."""
     modified_at = upgrade_path.stat().st_mtime
     age_seconds = max(0, int(time.time() - modified_at))
@@ -272,8 +277,31 @@ def build_transition_snapshot(upgrade_path: Path, stale_after_seconds: int) -> d
     if status.get("validator_member") is not True or status.get("validator_scheduled") is not True:
         blockers.append("validator set membership is not ready")
 
-    ready = not blockers
     upgrade_required = status.get("upgrade_available") is True or status.get("action") in {"upgrade", "required"}
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    expires_at = _parse_utc(status.get("expires_at"))
+    seconds_remaining: int | None = None
+    expired_by_seconds: int | None = None
+    if not upgrade_required:
+        deadline_state = "current"
+    elif expires_at is None:
+        deadline_state = "unknown"
+        blockers.append("required upgrade deadline is missing or invalid")
+    else:
+        signed_seconds = round((expires_at - current_time).total_seconds())
+        seconds_remaining = max(0, signed_seconds)
+        if signed_seconds <= 0:
+            deadline_state = "expired"
+            expired_by_seconds = abs(signed_seconds)
+            blockers.append("required signed release marker has expired")
+        elif signed_seconds <= 6 * 3600:
+            deadline_state = "critical"
+        elif signed_seconds <= 24 * 3600:
+            deadline_state = "warning"
+        else:
+            deadline_state = "watch"
+
+    ready = not blockers
     return {
         "schema": "octra-transition-readiness-v1",
         "observed_at": datetime.fromtimestamp(modified_at, timezone.utc).isoformat(),
@@ -289,6 +317,12 @@ def build_transition_snapshot(upgrade_path: Path, stale_after_seconds: int) -> d
             "source_commit": status.get("source_commit"),
             "expires_at": status.get("expires_at"),
             "published": status.get("release_published") is True,
+        },
+        "deadline": {
+            "state": deadline_state,
+            "due_at": expires_at.isoformat().replace("+00:00", "Z") if expires_at else None,
+            "seconds_remaining": seconds_remaining,
+            "expired_by_seconds": expired_by_seconds,
         },
         "runtime": {
             "binary_match": status.get("binary_match") is True,

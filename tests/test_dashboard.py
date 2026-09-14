@@ -6,6 +6,7 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -49,12 +50,18 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("telemetry is stale", snapshot["health"]["warnings"])
 
     def test_transition_snapshot_fails_closed_when_upgrade_is_required(self):
-        transition = build_transition_snapshot(UPGRADE_FIXTURE, stale_after_seconds=31_536_000)
+        transition = build_transition_snapshot(
+            UPGRADE_FIXTURE,
+            stale_after_seconds=31_536_000,
+            now=datetime(2026, 9, 10, tzinfo=timezone.utc),
+        )
         self.assertEqual(transition["state"], "upgrade_required")
         self.assertFalse(transition["ready"])
         self.assertFalse(transition["cutover_authorized"])
         self.assertEqual(transition["release"]["sequence"], 12)
         self.assertEqual(transition["runtime"]["lag"], 0)
+        self.assertEqual(transition["deadline"]["state"], "watch")
+        self.assertEqual(transition["deadline"]["seconds_remaining"], 99_719)
         self.assertIn("signed upgrade has not been fully applied", transition["blockers"])
         serialized = json.dumps(transition)
         self.assertNotIn("/opt/octra", serialized)
@@ -88,6 +95,67 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(transition["state"], "upgrade_current")
         self.assertEqual(transition["blockers"], [])
         self.assertFalse(transition["cutover_authorized"])
+        self.assertEqual(transition["deadline"]["state"], "current")
+
+    def test_transition_deadline_escalates_as_required_marker_expiry_nears(self):
+        cases = (
+            (datetime(2026, 9, 13, 20, 11, 58, tzinfo=timezone.utc), "watch", 86_401),
+            (datetime(2026, 9, 13, 20, 11, 59, tzinfo=timezone.utc), "warning", 86_400),
+            (datetime(2026, 9, 14, 14, 11, 59, tzinfo=timezone.utc), "critical", 21_600),
+            (datetime(2026, 9, 14, 20, 11, 59, tzinfo=timezone.utc), "expired", 0),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            upgrade = Path(directory) / "upgrade.txt"
+            upgrade.write_text(
+                "\n".join([
+                    "sequence = 13",
+                    "action = upgrade",
+                    "expires_at = 2026-09-14T20:11:59Z",
+                    "release_published = True",
+                    "upgrade_available = True",
+                    "binary_match = False",
+                    "source_match = False",
+                    "runtime_match = False",
+                    "rpc = ready",
+                    "lag = 0",
+                    "voting = True",
+                    "validator_member = True",
+                    "validator_scheduled = True",
+                    "status = pass",
+                    "gate = upgrade_diagnostic",
+                ]),
+                encoding="utf-8",
+            )
+            for current_time, expected_state, expected_remaining in cases:
+                with self.subTest(expected_state=expected_state):
+                    transition = build_transition_snapshot(
+                        upgrade,
+                        stale_after_seconds=31_536_000,
+                        now=current_time,
+                    )
+                    self.assertEqual(transition["deadline"]["state"], expected_state)
+                    self.assertEqual(transition["deadline"]["seconds_remaining"], expected_remaining)
+
+    def test_required_upgrade_with_missing_deadline_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            upgrade = Path(directory) / "upgrade.txt"
+            upgrade.write_text(
+                "\n".join([
+                    "action = upgrade",
+                    "release_published = True",
+                    "upgrade_available = True",
+                    "status = pass",
+                    "gate = upgrade_diagnostic",
+                ]),
+                encoding="utf-8",
+            )
+            transition = build_transition_snapshot(
+                upgrade,
+                stale_after_seconds=180,
+                now=datetime.now(timezone.utc),
+            )
+        self.assertEqual(transition["deadline"]["state"], "unknown")
+        self.assertIn("required upgrade deadline is missing or invalid", transition["blockers"])
 
     def test_stale_transition_telemetry_is_a_blocker(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -154,9 +222,14 @@ class ApiTests(unittest.TestCase):
     def test_transition_panel_is_rendered_from_the_read_only_api(self):
         script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
         html = (ROOT / "index.html").read_text(encoding="utf-8")
+        css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
         self.assertIn("/api/transition", script)
         self.assertIn('id="transition-state"', html)
+        self.assertIn('id="transition-deadline"', html)
         self.assertIn('id="transition-blockers"', html)
+        self.assertIn("deadline-${deadline.state", script)
+        self.assertIn("deadline-critical", css)
+        self.assertIn("UPGRADE EXPIRED", script)
 
     def test_storage_runway_panel_is_rendered_from_the_read_only_api(self):
         script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")

@@ -133,7 +133,12 @@ execute pruning because recovery and storage procedures remain release-specific.
 
 The transition panel checks the signed release sequence, diagnostic pass gate,
 binary/source/runtime matches, RPC, head lag, voting, and validator-set
-membership. Missing or stale evidence is a blocker. The panel intentionally
+membership. When an upgrade is required, it derives a deadline watch from the
+signed marker expiry: more than 24 hours is watch, 24 hours is warning, six
+hours is critical, and an expired or malformed deadline is an explicit blocker.
+The browser refreshes this status every minute while the diagnostic collector
+updates the underlying signed evidence every five minutes. Missing or stale
+evidence is a blocker. The panel intentionally
 hard-codes `cutover_authorized: false`: even when every upgrade gate passes,
 operators must wait for the official signed mainnet configuration and an
 explicit cutover decision.

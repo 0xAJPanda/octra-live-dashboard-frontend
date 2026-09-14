@@ -4,16 +4,19 @@ let address = '';
 let snapshotBusy = false;
 let networkBusy = false;
 let transitionBusy = false;
+let transitionFailures = 0;
 let storageBusy = false;
 let reliabilityBusy = false;
 let snapshotFailures = 0;
 let networkFailures = 0;
 let refreshTimer;
 let networkTimer;
+let transitionTimer;
 let storageTimer;
 let reliabilityTimer;
 const pageRefreshMs = 10_000;
 const networkRefreshMs = 30_000;
+const transitionRefreshMs = 60_000;
 const storageRefreshMs = 60_000;
 const reliabilityRefreshMs = 60_000;
 const validatorAddress = decodeURIComponent(location.pathname.match(/^\/validator\/(oct[A-Za-z0-9]{40,80})$/)?.[1] || '');
@@ -183,17 +186,26 @@ function isoTime(value) {
 function renderTransition(transition) {
   const release = transition.release || {};
   const runtime = transition.runtime || {};
+  const deadline = transition.deadline || {};
   const blockers = Array.isArray(transition.blockers) ? transition.blockers : [];
   const labels = {
-    upgrade_required: 'UPGRADE REQUIRED',
+    upgrade_required: deadline.state === 'expired' ? 'UPGRADE EXPIRED' : deadline.state === 'critical' ? 'UPGRADE ≤6H' : 'UPGRADE REQUIRED',
     upgrade_current: 'UPGRADE CURRENT',
     degraded: 'NOT READY',
     unavailable: 'UNAVAILABLE',
   };
-  $('transition-panel').className = `transition-panel ${transition.ready ? 'ready' : 'blocked'}`;
+  $('transition-panel').className = `transition-panel ${transition.ready ? 'ready' : 'blocked'} deadline-${deadline.state || 'unknown'}`;
   $('transition-state').textContent = labels[transition.state] || 'CHECKING';
   $('transition-sequence').textContent = release.sequence === undefined || release.sequence === null ? '—' : `sequence ${num(release.sequence)}`;
-  $('transition-expires').textContent = release.expires_at ? isoTime(release.expires_at) : 'not reported';
+  if (deadline.state === 'current') {
+    $('transition-deadline').textContent = 'no action required';
+  } else if (deadline.state === 'expired') {
+    $('transition-deadline').textContent = `expired ${duration(deadline.expired_by_seconds)} ago`;
+  } else if (deadline.seconds_remaining !== null && deadline.seconds_remaining !== undefined && Number.isFinite(Number(deadline.seconds_remaining))) {
+    $('transition-deadline').textContent = `${duration(deadline.seconds_remaining)} remaining`;
+  } else {
+    $('transition-deadline').textContent = 'deadline unknown';
+  }
   $('transition-matches').textContent = [runtime.binary_match, runtime.source_match, runtime.runtime_match].map(value => value ? 'pass' : 'fail').join(' / ');
   $('transition-runtime').textContent = `${num(runtime.lag)} epochs / ${runtime.voting ? 'voting' : 'not voting'}`;
   $('transition-blockers').textContent = blockers.length ? blockers.join(' · ') : 'All signed upgrade readiness gates pass.';
@@ -207,10 +219,14 @@ async function refreshTransition() {
     const response = await fetch('/api/transition', { cache: 'no-store' });
     if (!response.ok) throw new Error(response.status);
     renderTransition(await response.json());
+    transitionFailures = 0;
   } catch (error) {
     renderTransition({ state: 'unavailable', ready: false, blockers: ['signed upgrade telemetry is unavailable'] });
+    transitionFailures += 1;
   } finally {
     transitionBusy = false;
+    clearTimeout(transitionTimer);
+    transitionTimer = setTimeout(refreshTransition, nextDelay(transitionRefreshMs, transitionFailures));
   }
 }
 
