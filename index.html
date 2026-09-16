@@ -90,6 +90,20 @@
       <p id="reliability-message" class="reliability-message">Collecting sampled local health evidence. This is not independently measured uptime.</p>
     </section>
 
+    <section class="memory-trend-panel" id="memory-trend-panel" aria-labelledby="memory-trend-title">
+      <div class="memory-trend-head">
+        <div><p class="eyebrow">restart-aware forecast</p><h3 id="memory-trend-title">Validator memory growth</h3></div>
+        <strong id="memory-trend-state">collecting</strong>
+      </div>
+      <div class="memory-trend-grid">
+        <div><small>validator RSS</small><b id="memory-trend-rss">—</b></div>
+        <div><small>growth / hour</small><b id="memory-trend-growth">—</b></div>
+        <div><small>time to reserve</small><b id="memory-trend-runway">—</b></div>
+        <div><small>evidence after restart</small><b id="memory-trend-evidence">—</b></div>
+      </div>
+      <p id="memory-trend-message" class="memory-trend-message">Collecting sanitized RSS history. No automatic restart or recovery action is performed.</p>
+    </section>
+
     <section class="dashboard-grid">
       <article class="panel host-panel" id="system">
         <div class="panel-title"><div><span>HOST HEALTH</span><small>octra-node</small></div></div>

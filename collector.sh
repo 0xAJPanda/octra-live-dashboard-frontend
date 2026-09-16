@@ -41,6 +41,11 @@ python3 "$SCRIPT_DIR/reliability_collector.py" \
   --status-file "$STATUS_PATH" \
   --history-file "$RELIABILITY_HISTORY_PATH"
 
+MEMORY_HISTORY_PATH=${OCTRA_MEMORY_HISTORY_PATH:-"$STATUS_DIR/memory-history.json"}
+python3 "$SCRIPT_DIR/memory_collector.py" \
+  --status-file "$STATUS_PATH" \
+  --history-file "$MEMORY_HISTORY_PATH"
+
 NETWORK_PATH=${OCTRA_NETWORK_PATH:-"$STATUS_DIR/network.json"}
 HISTORY_PATH=${OCTRA_HISTORY_PATH:-"$STATUS_DIR/network-history.json"}
 RPC_URL=${OCTRA_RPC_URL:-http://127.0.0.1:29080/rpc}

@@ -1,0 +1,12 @@
+{
+  "schema": "octra-validator-memory-history-v1",
+  "samples": [
+    {"observed_at":"2026-09-16T00:00:00+00:00","rss_bytes":4294967296,"host_total_bytes":34359738368,"host_available_bytes":21474836480,"restarts":1},
+    {"observed_at":"2026-09-16T00:10:00+00:00","rss_bytes":4563402752,"host_total_bytes":34359738368,"host_available_bytes":21206401024,"restarts":1},
+    {"observed_at":"2026-09-16T00:20:00+00:00","rss_bytes":4831838208,"host_total_bytes":34359738368,"host_available_bytes":20937965568,"restarts":1},
+    {"observed_at":"2026-09-16T00:30:00+00:00","rss_bytes":5100273664,"host_total_bytes":34359738368,"host_available_bytes":20669530112,"restarts":1},
+    {"observed_at":"2026-09-16T00:40:00+00:00","rss_bytes":5368709120,"host_total_bytes":34359738368,"host_available_bytes":20401094656,"restarts":1},
+    {"observed_at":"2026-09-16T00:50:00+00:00","rss_bytes":5637144576,"host_total_bytes":34359738368,"host_available_bytes":20132659200,"restarts":1},
+    {"observed_at":"2026-09-16T01:00:00+00:00","rss_bytes":5905580032,"host_total_bytes":34359738368,"host_available_bytes":19864223744,"restarts":1}
+  ]
+}

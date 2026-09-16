@@ -7,6 +7,7 @@ let transitionBusy = false;
 let transitionFailures = 0;
 let storageBusy = false;
 let reliabilityBusy = false;
+let memoryBusy = false;
 let snapshotFailures = 0;
 let networkFailures = 0;
 let refreshTimer;
@@ -14,11 +15,13 @@ let networkTimer;
 let transitionTimer;
 let storageTimer;
 let reliabilityTimer;
+let memoryTimer;
 const pageRefreshMs = 10_000;
 const networkRefreshMs = 30_000;
 const transitionRefreshMs = 60_000;
 const storageRefreshMs = 60_000;
 const reliabilityRefreshMs = 60_000;
+const memoryRefreshMs = 60_000;
 const validatorAddress = decodeURIComponent(location.pathname.match(/^\/validator\/(oct[A-Za-z0-9]{40,80})$/)?.[1] || '');
 
 function num(value, digits = 0) {
@@ -299,6 +302,34 @@ async function refreshReliability() {
   }
 }
 
+function renderMemory(memory) {
+  const labels = { healthy: 'HEALTHY', watch: 'WATCH', warning: 'WARNING', critical: 'CRITICAL', collecting: 'COLLECTING', stale: 'STALE', unavailable: 'UNAVAILABLE' };
+  $('memory-trend-panel').className = `memory-trend-panel ${memory.state || 'unavailable'}`;
+  $('memory-trend-state').textContent = labels[memory.state] || 'CHECKING';
+  $('memory-trend-rss').textContent = bytes(memory.validator_rss_bytes);
+  $('memory-trend-growth').textContent = Number.isFinite(Number(memory.growth_mib_per_hour)) ? `${fixed(memory.growth_mib_per_hour, 1)} MiB` : '—';
+  $('memory-trend-runway').textContent = memory.forecast_available && Number.isFinite(Number(memory.hours_to_reserve)) ? duration(Number(memory.hours_to_reserve) * 3600) : memory.state === 'healthy' ? 'stable' : '—';
+  const evidence = memory.evidence || {};
+  $('memory-trend-evidence').textContent = Number.isFinite(Number(evidence.span_hours)) ? `${fixed(evidence.span_hours, 1)}h · ${num(evidence.samples)} samples · restart ${num(evidence.restart_generation)}` : '—';
+  $('memory-trend-message').textContent = `${memory.message || 'Memory growth observations are unavailable.'} Observation only; no restart or recovery is automatic.`;
+}
+
+async function refreshMemory() {
+  if (memoryBusy) return;
+  memoryBusy = true;
+  try {
+    const response = await fetch('/api/memory', { cache: 'no-store' });
+    if (!response.ok) throw new Error(response.status);
+    renderMemory(await response.json());
+  } catch (error) {
+    renderMemory({ state: 'unavailable', forecast_available: false });
+  } finally {
+    memoryBusy = false;
+    clearTimeout(memoryTimer);
+    memoryTimer = setTimeout(refreshMemory, document.hidden ? memoryRefreshMs * 6 : memoryRefreshMs);
+  }
+}
+
 function networkCell(row, value, className = '') {
   const cell = document.createElement('td');
   cell.textContent = value;
@@ -461,10 +492,11 @@ document.addEventListener('visibilitychange', () => {
     refreshTransition();
     refreshStorage();
     refreshReliability();
+    refreshMemory();
     loadValidatorDetail();
   }
 });
-window.addEventListener('focus', () => { refresh(); refreshNetwork(); refreshTransition(); refreshStorage(); refreshReliability(); loadValidatorDetail(); });
+window.addEventListener('focus', () => { refresh(); refreshNetwork(); refreshTransition(); refreshStorage(); refreshReliability(); refreshMemory(); loadValidatorDetail(); });
 tick();
 setInterval(tick, 1000);
 refresh();
@@ -472,4 +504,5 @@ refreshNetwork();
 refreshTransition();
 refreshStorage();
 refreshReliability();
+refreshMemory();
 loadValidatorDetail();

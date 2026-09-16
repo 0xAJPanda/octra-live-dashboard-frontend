@@ -64,6 +64,7 @@ PUBLIC_FIELDS = {
 NETWORK_SCHEMA = "octra-public-validator-network-v1"
 STORAGE_HISTORY_SCHEMA = "octra-storage-history-v1"
 RELIABILITY_HISTORY_SCHEMA = "octra-validator-reliability-history-v1"
+MEMORY_HISTORY_SCHEMA = "octra-validator-memory-history-v1"
 NETWORK_VALIDATOR_FIELDS = {
     "address", "weight", "weight_share_pct", "active", "scheduled", "is_local",
     "consensus_observed", "consensus_age_seconds", "continuity_pct",
@@ -575,6 +576,124 @@ def build_reliability_snapshot(
     }
 
 
+def build_memory_snapshot(
+    history_path: Path,
+    stale_after_seconds: int,
+    *,
+    sample_interval_seconds: int = 60,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Estimate restart-aware RSS growth without exposing raw host history."""
+    raw = json.loads(history_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or raw.get("schema") != MEMORY_HISTORY_SCHEMA:
+        raise ValueError("unsupported memory history schema")
+
+    valid: dict[datetime, dict[str, int]] = {}
+    for item in raw.get("samples", [])[-10_080:] if isinstance(raw.get("samples"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        observed = _parse_utc(item.get("observed_at"))
+        rss = item.get("rss_bytes")
+        total = item.get("host_total_bytes")
+        available = item.get("host_available_bytes")
+        restarts = item.get("restarts")
+        if (
+            observed
+            and isinstance(rss, int) and rss >= 0
+            and isinstance(total, int) and total > 0
+            and isinstance(available, int) and 0 <= available <= total
+            and isinstance(restarts, int) and restarts >= 0
+        ):
+            valid[observed] = {
+                "rss_bytes": rss,
+                "host_total_bytes": total,
+                "host_available_bytes": available,
+                "restarts": restarts,
+            }
+    samples = sorted(valid.items(), key=lambda pair: pair[0])
+    if not samples:
+        raise ValueError("memory history has no valid samples")
+
+    latest_time, latest = samples[-1]
+    window_start = latest_time.timestamp() - 86_400
+    samples = [pair for pair in samples if pair[0].timestamp() >= window_start]
+
+    # A restart intentionally drops RSS. Forecast only the current restart
+    # generation so the reset cannot disguise renewed post-restart growth.
+    generation_start = 0
+    for index in range(1, len(samples)):
+        if samples[index][1]["restarts"] != samples[index - 1][1]["restarts"]:
+            generation_start = index
+    samples = samples[generation_start:]
+
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    age_seconds = max(0, int((current_time - latest_time).total_seconds()))
+    span_seconds = max(0.0, (latest_time - samples[0][0]).total_seconds())
+    interval = max(1, sample_interval_seconds)
+    expected = max(1, round(span_seconds / interval) + 1)
+    coverage = min(100.0, len(samples) / expected * 100)
+    total = latest["host_total_bytes"]
+    available = latest["host_available_bytes"]
+    reserve = min(total, max(round(total * 0.15), 2 * 1024**3))
+    base = {
+        "schema": "octra-validator-memory-v1",
+        "state": "collecting",
+        "observed_at": latest_time.isoformat(),
+        "age_seconds": age_seconds,
+        "validator_rss_bytes": latest["rss_bytes"],
+        "host_total_bytes": total,
+        "host_available_bytes": available,
+        "reserve_bytes": reserve,
+        "growth_mib_per_hour": None,
+        "hours_to_reserve": None,
+        "forecast_available": False,
+        "evidence": {
+            "samples": len(samples),
+            "span_hours": round(span_seconds / 3600, 1),
+            "coverage_pct": round(coverage, 2),
+            "restart_generation": latest["restarts"],
+        },
+    }
+    if age_seconds > stale_after_seconds:
+        return base | {"state": "stale", "message": "Memory observations are stale; recent growth is unknown."}
+    if len(samples) < 6 or span_seconds < 30 * 60 or coverage < 80:
+        return base | {"message": "Collecting 30 continuous minutes of memory evidence after the latest restart."}
+
+    midpoint = len(samples) // 2
+    early = samples[:midpoint]
+    late = samples[midpoint:]
+    early_rss = statistics.median(item[1]["rss_bytes"] for item in early)
+    late_rss = statistics.median(item[1]["rss_bytes"] for item in late)
+    early_time = statistics.median(item[0].timestamp() for item in early)
+    late_time = statistics.median(item[0].timestamp() for item in late)
+    rate = (late_rss - early_rss) / max(1.0, late_time - early_time)
+    stable_rate = 16 * 1024**2 / 3600
+    if rate < stable_rate:
+        return base | {
+            "state": "healthy",
+            "growth_mib_per_hour": 0.0,
+            "message": "No sustained validator RSS growth is visible in the current restart generation.",
+        }
+
+    usable = max(0, available - reserve)
+    hours = usable / rate / 3600
+    if available <= reserve or hours < 6:
+        state = "critical"
+    elif hours < 24:
+        state = "warning"
+    elif hours < 72:
+        state = "watch"
+    else:
+        state = "healthy"
+    return base | {
+        "state": state,
+        "forecast_available": True,
+        "growth_mib_per_hour": round(rate * 3600 / 1024**2, 2),
+        "hours_to_reserve": round(hours, 2),
+        "message": "Projection uses only post-restart RSS growth and preserves the larger of 15% or 2 GiB host memory.",
+    }
+
+
 def build_network_snapshot(network_path: Path, stale_after_seconds: int) -> dict[str, Any]:
     modified_at = network_path.stat().st_mtime
     age_seconds = max(0, int(time.time() - modified_at))
@@ -657,6 +776,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path == "/api/reliability":
             self._serve_reliability()
             return
+        if path == "/api/memory":
+            self._serve_memory()
+            return
         if path.startswith("/api/validators/"):
             self._serve_validator(path.removeprefix("/api/validators/"))
             return
@@ -731,6 +853,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
             }).encode()
             self._send(503, body, "application/json", no_store=True)
 
+    def _serve_memory(self) -> None:
+        try:
+            payload = build_memory_snapshot(
+                self.server.memory_history_path,
+                self.server.stale_after_seconds * 5,
+                sample_interval_seconds=self.server.sample_interval_seconds,
+            )
+            self._send(200, json.dumps(payload, separators=(",", ":")).encode(), "application/json", no_store=True)
+        except (FileNotFoundError, OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+            body = json.dumps({
+                "schema": "octra-validator-memory-v1",
+                "state": "unavailable",
+                "forecast_available": False,
+                "error": type(error).__name__,
+            }).encode()
+            self._send(503, body, "application/json", no_store=True)
+
     def _serve_validator(self, address: str) -> None:
         try:
             payload = build_validator_snapshot(self.server.network_path, self.server.stale_after_seconds, address)
@@ -769,7 +908,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--upgrade-file", type=Path, default=Path("/data/upgrade.txt"))
     parser.add_argument("--storage-history-file", type=Path, default=Path("/data/storage-history.json"))
     parser.add_argument("--reliability-history-file", type=Path, default=Path("/data/reliability-history.json"))
-    parser.add_argument("--reliability-interval", type=int, default=60)
+    parser.add_argument("--memory-history-file", type=Path, default=Path("/data/memory-history.json"))
+    parser.add_argument("--sample-interval", "--reliability-interval", dest="sample_interval", type=int, default=60)
     parser.add_argument("--stale-after", type=int, default=180)
     return parser.parse_args()
 
@@ -782,7 +922,9 @@ def main() -> None:
     server.upgrade_path = args.upgrade_file
     server.storage_history_path = args.storage_history_file
     server.reliability_history_path = args.reliability_history_file
-    server.reliability_interval_seconds = args.reliability_interval
+    server.memory_history_path = args.memory_history_file
+    server.reliability_interval_seconds = args.sample_interval
+    server.sample_interval_seconds = args.sample_interval
     server.stale_after_seconds = args.stale_after
     server.project_dir = Path(__file__).resolve().parent
     print(f"Octra dashboard listening on http://{args.host}:{args.port}", flush=True)

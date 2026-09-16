@@ -22,6 +22,9 @@ The original responsive UI is retained. A small dependency-free backend and host
   six hours of evidence, and never runs pruning, recovery, or storage commands.
 - Reliability history stores only coarse health booleans, epoch, and restart
   count; it never stores validator identity, logs, paths, peers, or keys.
+- Memory history stores only validator RSS, coarse host memory totals, and the
+  restart counter; forecasts never bridge a process restart or expose raw
+  samples to the browser.
 
 The public validator address is intentionally displayed because it is already public chain identity.
 
@@ -47,6 +50,7 @@ sudo install -o root -g root -m 0755 collector.sh /usr/local/libexec/octra-dashb
 sudo install -o root -g root -m 0644 network_collector.py /usr/local/libexec/network_collector.py
 sudo install -o root -g root -m 0644 storage_collector.py /usr/local/libexec/storage_collector.py
 sudo install -o root -g root -m 0644 reliability_collector.py /usr/local/libexec/reliability_collector.py
+sudo install -o root -g root -m 0644 memory_collector.py /usr/local/libexec/memory_collector.py
 sudo install -o root -g root -m 0755 transition_collector.sh /usr/local/libexec/octra-dashboard-transition-collector
 sudo install -d -o octra -g octra -m 0755 /var/lib/octra/dashboard
 sudo install -o root -g root -m 0644 deploy/octra-dashboard-collector.service /etc/systemd/system/
@@ -105,7 +109,24 @@ process + RPC + sync + voting + active + epoch + restart count
   -> bounded reliability-history.json (atomic, maximum 10,080 samples)
   -> GET /api/reliability
   -> 24-hour sampled reliability panel (observation only)
+
+validator RSS + host memory totals + restart count
+  -> bounded memory-history.json (atomic, maximum 10,080 samples)
+  -> restart-aware growth and protected-reserve forecast
+  -> GET /api/memory
+  -> validator memory growth panel (observation only)
 ```
+
+## Memory growth semantics
+
+The memory panel requires at least six samples, 30 continuous minutes, and 80%
+collection coverage before estimating a trend. It discards every sample before
+the latest restart-counter transition so the expected RSS drop from a restart
+cannot hide renewed growth. A median early/late slope is projected only when
+growth exceeds 16 MiB/hour, and runway preserves the larger of 15% of host RAM
+or 2 GiB available. Thresholds are critical below six hours, warning below 24,
+and watch below 72. Stale or sparse evidence fails closed. The panel is an
+operator observation; it never restarts the validator or initiates recovery.
 
 ## Reliability semantics
 

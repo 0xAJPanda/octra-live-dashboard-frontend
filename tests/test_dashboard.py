@@ -18,6 +18,7 @@ FIXTURE = ROOT / "tests" / "fixture_status.txt"
 UPGRADE_FIXTURE = ROOT / "tests" / "fixture_upgrade.txt"
 STORAGE_FIXTURE = ROOT / "tests" / "fixture_storage_history.json"
 RELIABILITY_FIXTURE = ROOT / "tests" / "fixture_reliability_history.json"
+MEMORY_FIXTURE = ROOT / "tests" / "fixture_memory_history.json"
 
 
 class SnapshotTests(unittest.TestCase):
@@ -178,7 +179,9 @@ class ApiTests(unittest.TestCase):
         cls.server.network_path = ROOT / "tests" / "fixture_network.json"
         cls.server.storage_history_path = STORAGE_FIXTURE
         cls.server.reliability_history_path = RELIABILITY_FIXTURE
+        cls.server.memory_history_path = MEMORY_FIXTURE
         cls.server.reliability_interval_seconds = 3600
+        cls.server.sample_interval_seconds = 600
         cls.server.stale_after_seconds = 31_536_000
         cls.server.project_dir = ROOT
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -246,6 +249,13 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="reliability-coverage"', html)
         self.assertIn('id="reliability-progress"', html)
 
+    def test_memory_panel_is_rendered_from_the_read_only_api(self):
+        script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("/api/memory", script)
+        self.assertIn('id="memory-trend-state"', html)
+        self.assertIn('id="memory-trend-runway"', html)
+
     def test_health_endpoint(self):
         with urllib.request.urlopen(f"{self.base}/healthz") as response:
             self.assertEqual(response.read(), b"ok\n")
@@ -280,6 +290,16 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["schema"], "octra-validator-reliability-v1")
         self.assertEqual(payload["state"], "healthy")
         self.assertEqual(payload["epoch_progress"]["state"], "progressing")
+        serialized = json.dumps(payload)
+        self.assertNotIn('"samples": [', serialized)
+        self.assertNotIn("address", serialized)
+
+    def test_memory_endpoint_returns_only_derived_restart_aware_metrics(self):
+        with urllib.request.urlopen(f"{self.base}/api/memory") as response:
+            payload = json.load(response)
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(payload["schema"], "octra-validator-memory-v1")
+        self.assertTrue(payload["forecast_available"])
         serialized = json.dumps(payload)
         self.assertNotIn('"samples": [', serialized)
         self.assertNotIn("address", serialized)
