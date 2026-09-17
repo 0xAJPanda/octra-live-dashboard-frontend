@@ -12,7 +12,14 @@ trap 'rm -f "$TEMP_UPGRADE" "$RAW_UPGRADE"' EXIT HUP INT TERM
 
 # controls/upgrade.sh is diagnostic-only unless --apply is explicitly supplied.
 # This collector never passes --apply and publishes only strict, public tokens.
-(cd "$NODE_DIR" && sh controls/upgrade.sh) > "$RAW_UPGRADE"
+# A required-release diagnostic returns 1 after printing a valid report. Treat
+# that as data, but still fail closed for any other collector error.
+if (cd "$NODE_DIR" && sh controls/upgrade.sh --root "$NODE_DIR") > "$RAW_UPGRADE"; then
+  :
+else
+  upgrade_status=$?
+  [ "$upgrade_status" -eq 1 ] || exit "$upgrade_status"
+fi
 awk '
 BEGIN {
   split("sequence action public_commit source_commit expires_at binary_match source_match runtime_match rpc head_epoch peer_epoch lag voting validator_member validator_scheduled release_published upgrade_available status gate", fields, " ")
