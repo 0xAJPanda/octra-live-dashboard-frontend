@@ -833,9 +833,9 @@ def build_network_snapshot(network_path: Path, stale_after_seconds: int) -> dict
         "scheduled": {"activation_epoch": activation if isinstance(activation, int) else None},
         "validators": validators,
         "limitations": {
-            "remote_uptime": "not exposed by the public validator-set RPC",
-            "continuity": "local observation of active-set membership, not host uptime",
-            "consensus_observed": "recent consensus evidence seen by this node, not an availability guarantee",
+            "availability": "not available from the public validator-set feed",
+            "continuity": "local observation of active-set membership, not a service guarantee",
+            "consensus_observed": "recent consensus evidence, not a service guarantee",
         },
     }
 
@@ -865,26 +865,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
-        if path == "/api/snapshot":
-            self._serve_snapshot()
-            return
         if path == "/api/network":
             self._serve_network()
-            return
-        if path == "/api/transition":
-            self._serve_transition()
-            return
-        if path == "/api/storage":
-            self._serve_storage()
-            return
-        if path == "/api/reliability":
-            self._serve_reliability()
-            return
-        if path == "/api/memory":
-            self._serve_memory()
-            return
-        if path == "/api/peers":
-            self._serve_peers()
             return
         if path.startswith("/api/validators/"):
             self._serve_validator(path.removeprefix("/api/validators/"))
@@ -1026,14 +1008,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8789)
-    parser.add_argument("--status-file", type=Path, default=Path("/data/status.txt"))
     parser.add_argument("--network-file", type=Path, default=Path("/data/network.json"))
-    parser.add_argument("--upgrade-file", type=Path, default=Path("/data/upgrade.txt"))
-    parser.add_argument("--storage-history-file", type=Path, default=Path("/data/storage-history.json"))
-    parser.add_argument("--reliability-history-file", type=Path, default=Path("/data/reliability-history.json"))
-    parser.add_argument("--memory-history-file", type=Path, default=Path("/data/memory-history.json"))
-    parser.add_argument("--peer-history-file", type=Path, default=Path("/data/peer-history.json"))
-    parser.add_argument("--sample-interval", "--reliability-interval", dest="sample_interval", type=int, default=60)
     parser.add_argument("--stale-after", type=int, default=180)
     return parser.parse_args()
 
@@ -1041,15 +1016,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
-    server.status_path = args.status_file
     server.network_path = args.network_file
-    server.upgrade_path = args.upgrade_file
-    server.storage_history_path = args.storage_history_file
-    server.reliability_history_path = args.reliability_history_file
-    server.memory_history_path = args.memory_history_file
-    server.peer_history_path = args.peer_history_file
-    server.reliability_interval_seconds = args.sample_interval
-    server.sample_interval_seconds = args.sample_interval
     server.stale_after_seconds = args.stale_after
     server.project_dir = Path(__file__).resolve().parent
     print(f"Octra dashboard listening on http://{args.host}:{args.port}", flush=True)

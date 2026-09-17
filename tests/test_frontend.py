@@ -1,5 +1,3 @@
-import re
-import subprocess
 import unittest
 from pathlib import Path
 
@@ -7,18 +5,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class FrontendFormattingTests(unittest.TestCase):
-    def test_byte_formatter_displays_terabyte_values_at_the_correct_scale(self):
+class FrontendContractTests(unittest.TestCase):
+    def test_frontend_requests_only_public_network_data(self):
         script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
-        function = re.search(r"function bytes\(value\) \{.*?\n\}", script, re.DOTALL)
-        self.assertIsNotNone(function)
-        result = subprocess.run(
-            ["node", "-e", f"{function.group(0)}; process.stdout.write(bytes(1047972020224));"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(result.stdout, "1.0 TB")
+        self.assertIn("/api/network", script)
+        for endpoint in ("/api/snapshot", "/api/transition", "/api/storage", "/api/reliability", "/api/memory", "/api/peers"):
+            self.assertNotIn(endpoint, script)
 
 
 if __name__ == "__main__":

@@ -196,19 +196,9 @@ class ApiTests(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join(timeout=2)
 
-    def test_snapshot_endpoint_and_security_headers(self):
-        with urllib.request.urlopen(f"{self.base}/api/snapshot") as response:
-            payload = json.load(response)
-            self.assertEqual(response.headers["X-Frame-Options"], "DENY")
-            self.assertEqual(response.headers["Strict-Transport-Security"], "max-age=31536000")
-            self.assertEqual(response.headers["Cache-Control"], "no-store")
-            self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
-        self.assertEqual(payload["status"]["validator"], "oct8mvdkX3babyBsrzHYUB1cSU9a79RTbHXi7nJNfHJnUmk")
-        self.assertNotIn("node", payload["status"])
-
     def test_static_assets_accept_cache_buster(self):
         with urllib.request.urlopen(f"{self.base}/static/script.js?v=1") as response:
-            self.assertIn(b"api/snapshot", response.read())
+            self.assertIn(b"api/network", response.read())
 
     def test_javascript_dom_ids_exist(self):
         script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
@@ -224,47 +214,6 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="network-validator-rows"', html)
         self.assertIn('id="network-remote-uptime-note"', html)
 
-    def test_transition_panel_is_rendered_from_the_read_only_api(self):
-        script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
-        html = (ROOT / "index.html").read_text(encoding="utf-8")
-        css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
-        self.assertIn("/api/transition", script)
-        self.assertIn('id="transition-state"', html)
-        self.assertIn('id="transition-deadline"', html)
-        self.assertIn('id="transition-blockers"', html)
-        self.assertIn("deadline-${deadline.state", script)
-        self.assertIn("deadline-critical", css)
-        self.assertIn("UPGRADE EXPIRED", script)
-
-    def test_storage_runway_panel_is_rendered_from_the_read_only_api(self):
-        script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
-        html = (ROOT / "index.html").read_text(encoding="utf-8")
-        self.assertIn("/api/storage", script)
-        self.assertIn('id="storage-state"', html)
-        self.assertIn('id="storage-runway"', html)
-
-    def test_reliability_panel_is_rendered_from_the_read_only_api(self):
-        script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
-        html = (ROOT / "index.html").read_text(encoding="utf-8")
-        self.assertIn("/api/reliability", script)
-        self.assertIn('id="reliability-state"', html)
-        self.assertIn('id="reliability-coverage"', html)
-        self.assertIn('id="reliability-progress"', html)
-
-    def test_memory_panel_is_rendered_from_the_read_only_api(self):
-        script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
-        html = (ROOT / "index.html").read_text(encoding="utf-8")
-        self.assertIn("/api/memory", script)
-        self.assertIn('id="memory-trend-state"', html)
-        self.assertIn('id="memory-trend-runway"', html)
-
-    def test_peer_stability_panel_is_rendered_from_the_read_only_api(self):
-        script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
-        html = (ROOT / "index.html").read_text(encoding="utf-8")
-        self.assertIn("/api/peers", script)
-        self.assertIn('id="peer-stability-state"', html)
-        self.assertIn('id="peer-stability-floor"', html)
-
     def test_health_endpoint(self):
         with urllib.request.urlopen(f"{self.base}/healthz") as response:
             self.assertEqual(response.read(), b"ok\n")
@@ -275,53 +224,18 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["schema"], "octra-public-validator-network-v1")
         self.assertGreaterEqual(payload["summary"]["active_validators"], 1)
 
-    def test_transition_endpoint_is_read_only_and_fail_closed(self):
-        with urllib.request.urlopen(f"{self.base}/api/transition") as response:
-            payload = json.load(response)
-            self.assertEqual(response.headers["Cache-Control"], "no-store")
-        self.assertEqual(payload["state"], "upgrade_required")
-        self.assertFalse(payload["cutover_authorized"])
+    def test_public_api_is_network_only(self):
+        """Host telemetry must never be part of the public dashboard contract."""
+        for endpoint in ("/api/snapshot", "/api/transition", "/api/storage", "/api/reliability", "/api/memory", "/api/peers"):
+            with self.subTest(endpoint=endpoint):
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    urllib.request.urlopen(f"{self.base}{endpoint}")
+                self.assertEqual(error.exception.code, 404)
 
-    def test_storage_endpoint_returns_only_derived_capacity_data(self):
-        with urllib.request.urlopen(f"{self.base}/api/storage") as response:
-            payload = json.load(response)
-            self.assertEqual(response.headers["Cache-Control"], "no-store")
-        self.assertEqual(payload["schema"], "octra-storage-runway-v1")
-        self.assertIn(payload["state"], {"healthy", "watch", "warning", "critical"})
-        serialized = json.dumps(payload)
-        self.assertNotIn("private_key", serialized)
-        self.assertNotIn("path", serialized)
-
-    def test_reliability_endpoint_returns_only_derived_observation_metrics(self):
-        with urllib.request.urlopen(f"{self.base}/api/reliability") as response:
-            payload = json.load(response)
-            self.assertEqual(response.headers["Cache-Control"], "no-store")
-        self.assertEqual(payload["schema"], "octra-validator-reliability-v1")
-        self.assertEqual(payload["state"], "healthy")
-        self.assertEqual(payload["epoch_progress"]["state"], "progressing")
-        serialized = json.dumps(payload)
-        self.assertNotIn('"samples": [', serialized)
-        self.assertNotIn('"address":', serialized)
-
-    def test_memory_endpoint_returns_only_derived_restart_aware_metrics(self):
-        with urllib.request.urlopen(f"{self.base}/api/memory") as response:
-            payload = json.load(response)
-            self.assertEqual(response.headers["Cache-Control"], "no-store")
-        self.assertEqual(payload["schema"], "octra-validator-memory-v1")
-        self.assertTrue(payload["forecast_available"])
-        serialized = json.dumps(payload)
-        self.assertNotIn('"samples": [', serialized)
-        self.assertNotIn("address", serialized)
-
-    def test_peer_endpoint_returns_only_aggregate_restart_aware_metrics(self):
-        with urllib.request.urlopen(f"{self.base}/api/peers") as response:
-            payload = json.load(response)
-            self.assertEqual(response.headers["Cache-Control"], "no-store")
-        self.assertEqual(payload["schema"], "octra-validator-peer-stability-v1")
-        self.assertEqual(payload["state"], "healthy")
-        serialized = json.dumps(payload)
-        self.assertNotIn('"samples": [', serialized)
-        self.assertNotIn('"address":', serialized)
+        with urllib.request.urlopen(f"{self.base}/api/network") as response:
+            serialized = response.read().decode("utf-8")
+        for forbidden in ("disk", "memory", "cpu", "load", "uptime", "rss", "process", "rpc", "peer_max_lag"):
+            self.assertNotIn(forbidden, serialized.lower())
 
     def test_validator_detail_api_returns_only_the_requested_public_record(self):
         address = "oct8mvdkX3babyBsrzHYUB1cSU9a79RTbHXi7nJNfHJnUmk"

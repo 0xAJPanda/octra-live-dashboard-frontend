@@ -148,18 +148,14 @@ class PeerCollectorTests(unittest.TestCase):
         self.assertNotIn("address", json.dumps(payload))
         self.assertNotIn("private_key", json.dumps(payload))
 
-    def test_project_wires_peer_history_into_collector_container_and_ui(self):
+    def test_peer_history_is_not_wired_into_the_public_deployment(self):
         root = Path(__file__).resolve().parents[1]
-        collector = (root / "collector.sh").read_text(encoding="utf-8")
-        dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
         compose = (root / "compose.yaml").read_text(encoding="utf-8")
         html = (root / "index.html").read_text(encoding="utf-8")
         script = (root / "static" / "script.js").read_text(encoding="utf-8")
-        self.assertIn('python3 "$SCRIPT_DIR/peer_collector.py"', collector)
-        self.assertIn("peer_collector.py", dockerfile)
-        self.assertIn("--peer-history-file", compose)
-        self.assertIn('id="peer-stability-state"', html)
-        self.assertIn("/api/peers", script)
+        self.assertNotIn("--peer-history-file", compose)
+        self.assertNotIn('id="peer-stability-state"', html)
+        self.assertNotIn("/api/peers", script)
 
 
 if __name__ == "__main__":

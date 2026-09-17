@@ -138,17 +138,13 @@ class MemoryCollectorTests(unittest.TestCase):
         self.assertNotIn("private_key", serialized)
         self.assertNotIn("never", serialized)
 
-    def test_collector_wiring_and_frontend_contract_exist(self):
-        collector = (ROOT / "collector.sh").read_text(encoding="utf-8")
-        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    def test_memory_data_is_not_wired_into_the_public_deployment(self):
         compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
-        self.assertIn('python3 "$SCRIPT_DIR/memory_collector.py"', collector)
-        self.assertIn("memory_collector.py", dockerfile)
-        self.assertIn("--memory-history-file", compose)
-        self.assertIn('id="memory-trend-state"', html)
-        self.assertIn("/api/memory", script)
+        self.assertNotIn("--memory-history-file", compose)
+        self.assertNotIn('id="memory-trend-state"', html)
+        self.assertNotIn("/api/memory", script)
 
 
 if __name__ == "__main__":
