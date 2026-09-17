@@ -93,7 +93,12 @@ def build_public_network(
 
     history_rows = history.get("validators") if isinstance(history.get("validators"), dict) else {}
     rows: list[dict[str, Any]] = []
-    for address in set(active_by_address) | set(scheduled_by_address):
+    addresses = set(active_by_address) | set(scheduled_by_address)
+    # The operator's address is already public chain identity. Retain it even
+    # when it is absent from both sets so the dashboard states that fact plainly.
+    if ADDRESS.fullmatch(local_address):
+        addresses.add(local_address)
+    for address in addresses:
         active_row = active_by_address.get(address)
         scheduled_row = scheduled_by_address.get(address)
         weight = (active_row or scheduled_row or {}).get("weight", 0)

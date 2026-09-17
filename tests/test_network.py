@@ -69,6 +69,19 @@ class NetworkCollectorTests(unittest.TestCase):
         self.assertNotIn("192.0.2.10", serialized)
         self.assertNotIn("config_hash", serialized)
 
+    def test_local_public_validator_is_retained_when_absent_from_the_current_set(self):
+        history = update_history({}, [REMOTE], "2026-09-01T20:00:00+00:00")
+        inactive = "octInactive11111111111111111111111111111111111"
+        public = build_public_network(
+            {"validators": [{"address": REMOTE, "weight": "1000000"}], "scheduled": {"validators": []}},
+            {}, history, inactive, "2026-09-01T20:00:00+00:00",
+        )
+        ours = next(item for item in public["validators"] if item["address"] == inactive)
+        self.assertTrue(ours["is_local"])
+        self.assertFalse(ours["active"])
+        self.assertFalse(ours["scheduled"])
+        self.assertEqual(ours["weight"], 0)
+
 
 class NetworkApiContractTests(unittest.TestCase):
     def test_api_revalidates_collector_output(self):
