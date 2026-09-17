@@ -211,6 +211,8 @@ class ApiTests(unittest.TestCase):
         script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn("/api/network", script)
+        self.assertIn("event.persisted", script)
+        self.assertIn("location.reload()", script)
         self.assertIn('id="network-validator-rows"', html)
         self.assertIn('id="network-remote-uptime-note"', html)
 

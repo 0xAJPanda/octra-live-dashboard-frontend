@@ -65,4 +65,7 @@ async function renderDetail() {
 }
 
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshNetwork(); });
+// A browser can restore an obsolete document from its back/forward cache after
+// a dashboard deployment. Reload it once so its DOM and API contract match.
+window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
 renderDetail().then(detail => { if (!detail) refreshNetwork(); }).catch(() => { $('connection').textContent = 'unavailable'; });
