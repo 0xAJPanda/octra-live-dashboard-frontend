@@ -52,7 +52,10 @@ async function refreshNetwork() {
 }
 
 async function renderDetail() {
-  const address = decodeURIComponent(location.pathname.removeprefix('/validator/'));
+  const detailPrefix = '/validator/';
+  const address = location.pathname.startsWith(detailPrefix)
+    ? decodeURIComponent(location.pathname.slice(detailPrefix.length))
+    : '';
   if (!address || location.pathname === '/') return false;
   $('validator-detail').hidden = false; document.querySelector('.network-explorer').hidden = true; document.querySelector('.network-hero').hidden = true;
   const response = await fetch(`/api/validators/${encodeURIComponent(address)}`, { cache: 'no-store' });
