@@ -65,6 +65,7 @@ NETWORK_SCHEMA = "octra-public-validator-network-v1"
 STORAGE_HISTORY_SCHEMA = "octra-storage-history-v1"
 RELIABILITY_HISTORY_SCHEMA = "octra-validator-reliability-history-v1"
 MEMORY_HISTORY_SCHEMA = "octra-validator-memory-history-v1"
+PEER_HISTORY_SCHEMA = "octra-validator-peer-history-v1"
 NETWORK_VALIDATOR_FIELDS = {
     "address", "weight", "weight_share_pct", "active", "scheduled", "is_local",
     "consensus_observed", "consensus_age_seconds", "continuity_pct",
@@ -694,6 +695,109 @@ def build_memory_snapshot(
     }
 
 
+def build_peer_snapshot(
+    history_path: Path,
+    stale_after_seconds: int,
+    *,
+    sample_interval_seconds: int = 60,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Summarize aggregate peer stability within the current restart generation."""
+    raw = json.loads(history_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or raw.get("schema") != PEER_HISTORY_SCHEMA:
+        raise ValueError("unsupported peer history schema")
+
+    valid: dict[datetime, dict[str, int]] = {}
+    for item in raw.get("samples", [])[-10_080:] if isinstance(raw.get("samples"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        observed = _parse_utc(item.get("observed_at"))
+        p2p = item.get("p2p_connected")
+        consensus = item.get("consensus_peers")
+        restarts = item.get("restarts")
+        if (
+            observed
+            and isinstance(p2p, int) and p2p >= 0
+            and isinstance(consensus, int) and consensus >= 0
+            and isinstance(restarts, int) and restarts >= 0
+        ):
+            valid[observed] = {"p2p_connected": p2p, "consensus_peers": consensus, "restarts": restarts}
+    samples = sorted(valid.items(), key=lambda pair: pair[0])
+    if not samples:
+        raise ValueError("peer history has no valid samples")
+
+    latest_time, latest = samples[-1]
+    window_start = latest_time.timestamp() - 86_400
+    samples = [pair for pair in samples if pair[0].timestamp() >= window_start]
+    generation_start = 0
+    for index in range(1, len(samples)):
+        if samples[index][1]["restarts"] != samples[index - 1][1]["restarts"]:
+            generation_start = index
+    samples = samples[generation_start:]
+
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    age_seconds = max(0, int((current_time - latest_time).total_seconds()))
+    span_seconds = max(0.0, (latest_time - samples[0][0]).total_seconds())
+    interval = max(1, sample_interval_seconds)
+    expected = max(1, round(span_seconds / interval) + 1)
+    coverage = min(100.0, len(samples) / expected * 100)
+    zero_samples = sum(
+        1 for _, sample in samples
+        if sample["p2p_connected"] == 0 or sample["consensus_peers"] == 0
+    )
+    largest_drop = 0.0
+    for (_, previous), (_, current) in zip(samples, samples[1:]):
+        for field in ("p2p_connected", "consensus_peers"):
+            if previous[field] > 0:
+                largest_drop = max(largest_drop, (previous[field] - current[field]) / previous[field] * 100)
+
+    base = {
+        "schema": "octra-validator-peer-stability-v1",
+        "state": "collecting",
+        "observed_at": latest_time.isoformat(),
+        "age_seconds": age_seconds,
+        "current": {
+            "p2p_connected": latest["p2p_connected"],
+            "consensus_peers": latest["consensus_peers"],
+        },
+        "floor": {
+            "p2p_connected": min(sample["p2p_connected"] for _, sample in samples),
+            "consensus_peers": min(sample["consensus_peers"] for _, sample in samples),
+        },
+        "zero_peer_observations": zero_samples,
+        "largest_drop_pct": round(largest_drop, 2),
+        "evidence": {
+            "samples": len(samples),
+            "span_hours": round(span_seconds / 3600, 1),
+            "coverage_pct": round(coverage, 2),
+            "restart_generation": latest["restarts"],
+        },
+        "limitations": "Aggregate local peer counts only; no peer identities, addresses, logs, or remote uptime are exposed.",
+    }
+    if age_seconds > stale_after_seconds:
+        return base | {"state": "stale", "message": "Peer observations are stale; current connectivity is unknown."}
+    if latest["p2p_connected"] == 0 or latest["consensus_peers"] == 0:
+        return base | {"state": "critical", "message": "The validator is currently isolated from P2P or consensus peers."}
+    if len(samples) < 6 or span_seconds < 30 * 60 or coverage < 80:
+        return base | {"message": "Collecting 30 continuous minutes of peer evidence after the latest restart."}
+    if zero_samples:
+        last_zero = max(
+            observed for observed, sample in samples
+            if sample["p2p_connected"] == 0 or sample["consensus_peers"] == 0
+        )
+        recovery_minutes = max(0, round((latest_time - last_zero).total_seconds() / 60))
+        return base | {
+            "state": "warning",
+            "recovery_minutes": recovery_minutes,
+            "message": "Peer connectivity recovered after one or more isolation observations in this restart generation.",
+        }
+    if largest_drop >= 50:
+        return base | {"state": "warning", "message": "A severe peer-count drop was observed even though connectivity is currently available."}
+    if largest_drop >= 30:
+        return base | {"state": "watch", "message": "Peer counts recovered after a material dip in this restart generation."}
+    return base | {"state": "healthy", "message": "Peer connectivity remained stable throughout the observed restart generation."}
+
+
 def build_network_snapshot(network_path: Path, stale_after_seconds: int) -> dict[str, Any]:
     modified_at = network_path.stat().st_mtime
     age_seconds = max(0, int(time.time() - modified_at))
@@ -778,6 +882,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/memory":
             self._serve_memory()
+            return
+        if path == "/api/peers":
+            self._serve_peers()
             return
         if path.startswith("/api/validators/"):
             self._serve_validator(path.removeprefix("/api/validators/"))
@@ -870,6 +977,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
             }).encode()
             self._send(503, body, "application/json", no_store=True)
 
+    def _serve_peers(self) -> None:
+        try:
+            payload = build_peer_snapshot(
+                self.server.peer_history_path,
+                self.server.stale_after_seconds * 5,
+                sample_interval_seconds=self.server.sample_interval_seconds,
+            )
+            self._send(200, json.dumps(payload, separators=(",", ":")).encode(), "application/json", no_store=True)
+        except (FileNotFoundError, OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+            body = json.dumps({
+                "schema": "octra-validator-peer-stability-v1",
+                "state": "unavailable",
+                "error": type(error).__name__,
+            }).encode()
+            self._send(503, body, "application/json", no_store=True)
+
     def _serve_validator(self, address: str) -> None:
         try:
             payload = build_validator_snapshot(self.server.network_path, self.server.stale_after_seconds, address)
@@ -909,6 +1032,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--storage-history-file", type=Path, default=Path("/data/storage-history.json"))
     parser.add_argument("--reliability-history-file", type=Path, default=Path("/data/reliability-history.json"))
     parser.add_argument("--memory-history-file", type=Path, default=Path("/data/memory-history.json"))
+    parser.add_argument("--peer-history-file", type=Path, default=Path("/data/peer-history.json"))
     parser.add_argument("--sample-interval", "--reliability-interval", dest="sample_interval", type=int, default=60)
     parser.add_argument("--stale-after", type=int, default=180)
     return parser.parse_args()
@@ -923,6 +1047,7 @@ def main() -> None:
     server.storage_history_path = args.storage_history_file
     server.reliability_history_path = args.reliability_history_file
     server.memory_history_path = args.memory_history_file
+    server.peer_history_path = args.peer_history_file
     server.reliability_interval_seconds = args.sample_interval
     server.sample_interval_seconds = args.sample_interval
     server.stale_after_seconds = args.stale_after

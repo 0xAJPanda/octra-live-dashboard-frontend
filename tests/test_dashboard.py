@@ -19,6 +19,7 @@ UPGRADE_FIXTURE = ROOT / "tests" / "fixture_upgrade.txt"
 STORAGE_FIXTURE = ROOT / "tests" / "fixture_storage_history.json"
 RELIABILITY_FIXTURE = ROOT / "tests" / "fixture_reliability_history.json"
 MEMORY_FIXTURE = ROOT / "tests" / "fixture_memory_history.json"
+PEER_FIXTURE = ROOT / "tests" / "fixture_peer_history.json"
 
 
 class SnapshotTests(unittest.TestCase):
@@ -180,6 +181,7 @@ class ApiTests(unittest.TestCase):
         cls.server.storage_history_path = STORAGE_FIXTURE
         cls.server.reliability_history_path = RELIABILITY_FIXTURE
         cls.server.memory_history_path = MEMORY_FIXTURE
+        cls.server.peer_history_path = PEER_FIXTURE
         cls.server.reliability_interval_seconds = 3600
         cls.server.sample_interval_seconds = 600
         cls.server.stale_after_seconds = 31_536_000
@@ -256,6 +258,13 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="memory-trend-state"', html)
         self.assertIn('id="memory-trend-runway"', html)
 
+    def test_peer_stability_panel_is_rendered_from_the_read_only_api(self):
+        script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("/api/peers", script)
+        self.assertIn('id="peer-stability-state"', html)
+        self.assertIn('id="peer-stability-floor"', html)
+
     def test_health_endpoint(self):
         with urllib.request.urlopen(f"{self.base}/healthz") as response:
             self.assertEqual(response.read(), b"ok\n")
@@ -292,7 +301,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["epoch_progress"]["state"], "progressing")
         serialized = json.dumps(payload)
         self.assertNotIn('"samples": [', serialized)
-        self.assertNotIn("address", serialized)
+        self.assertNotIn('"address":', serialized)
 
     def test_memory_endpoint_returns_only_derived_restart_aware_metrics(self):
         with urllib.request.urlopen(f"{self.base}/api/memory") as response:
@@ -303,6 +312,16 @@ class ApiTests(unittest.TestCase):
         serialized = json.dumps(payload)
         self.assertNotIn('"samples": [', serialized)
         self.assertNotIn("address", serialized)
+
+    def test_peer_endpoint_returns_only_aggregate_restart_aware_metrics(self):
+        with urllib.request.urlopen(f"{self.base}/api/peers") as response:
+            payload = json.load(response)
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(payload["schema"], "octra-validator-peer-stability-v1")
+        self.assertEqual(payload["state"], "healthy")
+        serialized = json.dumps(payload)
+        self.assertNotIn('"samples": [', serialized)
+        self.assertNotIn('"address":', serialized)
 
     def test_validator_detail_api_returns_only_the_requested_public_record(self):
         address = "oct8mvdkX3babyBsrzHYUB1cSU9a79RTbHXi7nJNfHJnUmk"

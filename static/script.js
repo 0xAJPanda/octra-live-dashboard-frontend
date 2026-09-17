@@ -8,6 +8,7 @@ let transitionFailures = 0;
 let storageBusy = false;
 let reliabilityBusy = false;
 let memoryBusy = false;
+let peerBusy = false;
 let snapshotFailures = 0;
 let networkFailures = 0;
 let refreshTimer;
@@ -16,12 +17,14 @@ let transitionTimer;
 let storageTimer;
 let reliabilityTimer;
 let memoryTimer;
+let peerTimer;
 const pageRefreshMs = 10_000;
 const networkRefreshMs = 30_000;
 const transitionRefreshMs = 60_000;
 const storageRefreshMs = 60_000;
 const reliabilityRefreshMs = 60_000;
 const memoryRefreshMs = 60_000;
+const peerRefreshMs = 60_000;
 const validatorAddress = decodeURIComponent(location.pathname.match(/^\/validator\/(oct[A-Za-z0-9]{40,80})$/)?.[1] || '');
 
 function num(value, digits = 0) {
@@ -330,6 +333,37 @@ async function refreshMemory() {
   }
 }
 
+function renderPeers(peers) {
+  const labels = { healthy: 'HEALTHY', watch: 'WATCH', warning: 'WARNING', critical: 'CRITICAL', collecting: 'COLLECTING', stale: 'STALE', unavailable: 'UNAVAILABLE' };
+  $('peer-stability-panel').className = `peer-stability-panel ${peers.state || 'unavailable'}`;
+  $('peer-stability-state').textContent = labels[peers.state] || 'CHECKING';
+  const current = peers.current || {};
+  const floor = peers.floor || {};
+  $('peer-stability-current').textContent = `${num(current.p2p_connected)} P2P / ${num(current.consensus_peers)} consensus`;
+  $('peer-stability-floor').textContent = `${num(floor.p2p_connected)} P2P / ${num(floor.consensus_peers)} consensus`;
+  $('peer-stability-zeroes').textContent = num(peers.zero_peer_observations);
+  $('peer-stability-drop').textContent = Number.isFinite(Number(peers.largest_drop_pct)) ? `${fixed(peers.largest_drop_pct, 1)}%` : '—';
+  const evidence = peers.evidence || {};
+  $('peer-stability-evidence').textContent = Number.isFinite(Number(evidence.span_hours)) ? `${fixed(evidence.span_hours, 1)}h · ${num(evidence.samples)} samples · restart ${num(evidence.restart_generation)}` : '—';
+  $('peer-stability-message').textContent = `${peers.message || 'Peer stability observations are unavailable.'} ${peers.limitations || 'Aggregate local counts only.'}`;
+}
+
+async function refreshPeers() {
+  if (peerBusy) return;
+  peerBusy = true;
+  try {
+    const response = await fetch('/api/peers', { cache: 'no-store' });
+    if (!response.ok) throw new Error(response.status);
+    renderPeers(await response.json());
+  } catch (error) {
+    renderPeers({ state: 'unavailable' });
+  } finally {
+    peerBusy = false;
+    clearTimeout(peerTimer);
+    peerTimer = setTimeout(refreshPeers, document.hidden ? peerRefreshMs * 6 : peerRefreshMs);
+  }
+}
+
 function networkCell(row, value, className = '') {
   const cell = document.createElement('td');
   cell.textContent = value;
@@ -493,10 +527,11 @@ document.addEventListener('visibilitychange', () => {
     refreshStorage();
     refreshReliability();
     refreshMemory();
+    refreshPeers();
     loadValidatorDetail();
   }
 });
-window.addEventListener('focus', () => { refresh(); refreshNetwork(); refreshTransition(); refreshStorage(); refreshReliability(); refreshMemory(); loadValidatorDetail(); });
+window.addEventListener('focus', () => { refresh(); refreshNetwork(); refreshTransition(); refreshStorage(); refreshReliability(); refreshMemory(); refreshPeers(); loadValidatorDetail(); });
 tick();
 setInterval(tick, 1000);
 refresh();
@@ -505,4 +540,5 @@ refreshTransition();
 refreshStorage();
 refreshReliability();
 refreshMemory();
+refreshPeers();
 loadValidatorDetail();

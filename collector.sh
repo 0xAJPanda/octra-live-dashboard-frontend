@@ -46,6 +46,11 @@ python3 "$SCRIPT_DIR/memory_collector.py" \
   --status-file "$STATUS_PATH" \
   --history-file "$MEMORY_HISTORY_PATH"
 
+PEER_HISTORY_PATH=${OCTRA_PEER_HISTORY_PATH:-"$STATUS_DIR/peer-history.json"}
+python3 "$SCRIPT_DIR/peer_collector.py" \
+  --status-file "$STATUS_PATH" \
+  --history-file "$PEER_HISTORY_PATH"
+
 NETWORK_PATH=${OCTRA_NETWORK_PATH:-"$STATUS_DIR/network.json"}
 HISTORY_PATH=${OCTRA_HISTORY_PATH:-"$STATUS_DIR/network-history.json"}
 RPC_URL=${OCTRA_RPC_URL:-http://127.0.0.1:29080/rpc}

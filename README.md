@@ -25,6 +25,9 @@ The original responsive UI is retained. A small dependency-free backend and host
 - Memory history stores only validator RSS, coarse host memory totals, and the
   restart counter; forecasts never bridge a process restart or expose raw
   samples to the browser.
+- Peer history stores only aggregate P2P/consensus counts and the restart
+  counter; no peer identities, addresses, logs, or connection endpoints are
+  persisted or returned.
 
 The public validator address is intentionally displayed because it is already public chain identity.
 
@@ -51,6 +54,7 @@ sudo install -o root -g root -m 0644 network_collector.py /usr/local/libexec/net
 sudo install -o root -g root -m 0644 storage_collector.py /usr/local/libexec/storage_collector.py
 sudo install -o root -g root -m 0644 reliability_collector.py /usr/local/libexec/reliability_collector.py
 sudo install -o root -g root -m 0644 memory_collector.py /usr/local/libexec/memory_collector.py
+sudo install -o root -g root -m 0644 peer_collector.py /usr/local/libexec/peer_collector.py
 sudo install -o root -g root -m 0755 transition_collector.sh /usr/local/libexec/octra-dashboard-transition-collector
 sudo install -d -o octra -g octra -m 0755 /var/lib/octra/dashboard
 sudo install -o root -g root -m 0644 deploy/octra-dashboard-collector.service /etc/systemd/system/
@@ -115,7 +119,24 @@ validator RSS + host memory totals + restart count
   -> restart-aware growth and protected-reserve forecast
   -> GET /api/memory
   -> validator memory growth panel (observation only)
+
+P2P count + consensus peer count + restart count
+  -> bounded peer-history.json (atomic, maximum 10,080 samples)
+  -> restart-aware isolation and count-drop evidence
+  -> GET /api/peers
+  -> peer stability panel (observation only)
 ```
+
+## Peer stability semantics
+
+The peer panel retains at most seven days of aggregate counts and evaluates the
+latest 24 hours, but never bridges a validator restart. Current zero P2P or
+consensus peers is immediately critical, even before the evidence window is
+complete. After 30 minutes with at least 80% collection coverage, recovered
+zero-peer observations and drops of 50% or more are warnings; drops of 30% or
+more are a watch. Stale, sparse, or malformed evidence fails closed. Counts are
+local observations and do not claim remote-validator uptime or diagnose the
+underlying network cause.
 
 ## Memory growth semantics
 
