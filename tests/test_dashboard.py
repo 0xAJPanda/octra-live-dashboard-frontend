@@ -200,6 +200,11 @@ class ApiTests(unittest.TestCase):
         with urllib.request.urlopen(f"{self.base}/static/script.js?v=1") as response:
             self.assertIn(b"api/network", response.read())
 
+    def test_dashboard_references_the_post_fix_script_revision(self):
+        """A client that cached the pre-browser-fix script must fetch a new asset URL."""
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn('src="/static/script.js?v=22"', html)
+
     def test_javascript_dom_ids_exist(self):
         script = (ROOT / "static" / "script.js").read_text(encoding="utf-8")
         html = (ROOT / "index.html").read_text(encoding="utf-8")
